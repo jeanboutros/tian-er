@@ -18,46 +18,19 @@ verified.
 
 ---
 
-## 1. Doxygen Documentation Rules
+## 1. Documentation Rules
 
-### 1.1 Mandatory Structure
+C/C++ documentation follows the **`doxygen-cpp`** skill. Agents MUST load `doxygen-cpp` for the full Doxygen format specification. This section only covers **embedded-specific additions** — for the mandatory structure, tag rules, and verification checklist, see `doxygen-cpp`.
 
-Every new **function**, **struct**, **class**, **enum**, or **macro group** must be
-preceded by a Doxygen `/** ... */` block with this structure:
-
-```cpp
-/**
- * @brief One-sentence summary of what this does
- *
- * Longer explanation if needed — describe the protocol, bit layout,
- * algorithm, or non-obvious design decision here.
- *
- * Use @code / @endcode blocks for:
- *   - Bit/byte layout diagrams
- *   - Arithmetic walkthroughs
- *   - Usage examples
- *
- * @code
- *   // Example: show inputs, intermediate steps, and result
- *   foo(REG_STATUS);   // 0x07 & 0x1F = 0x07 → cmd = 0x07
- * @endcode
- *
- * @param name   Description (include units, valid range, or bit meaning)
- * @return       What is returned and under what conditions
- */
-```
-
-### 1.2 Rules
+### 1.1 Embedded-Specific Rules
 
 | Element | Rule |
 |---------|------|
-| `@brief` | Always present; one sentence, no period at end |
-| `@code` | Use for any non-obvious bit manipulation, protocol encoding, or illustrative call site. Include an edge-case example (e.g. `0xFF` input) when the masking/clamping behaviour matters |
-| `@param` | One line per parameter; note which bits are used if the full width is not consumed |
-| `@return` | Always present for non-void functions |
+| `@code` | Include an edge-case example (e.g. `0xFF` input) when the masking/clamping behaviour matters |
+| `@param` | Note which bits are used if the full width is not consumed |
 | Inline comments | `/* short inline notes */` inside function bodies — do NOT duplicate the Doxygen block content |
 
-### 1.3 Examples in @code Blocks Must Use Typed Vocabulary
+### 1.2 Examples in @code Blocks Must Use Typed Vocabulary
 
 ```cpp
 // BAD — raw hex in an @code block, even though nrf24::reg::CONFIG exists

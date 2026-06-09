@@ -50,7 +50,7 @@ Write just enough code to make the test pass:
 
 ### REFACTOR: Clean Up
 
-- Add Doxygen documentation
+- Add documentation per the language-specific doc-standard skill
 - Ensure naming matches datasheet
 - Add edge case tests (0xFF, 0x00, reserved bits)
 

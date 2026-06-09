@@ -128,7 +128,7 @@ void write_reg(uint8_t addr, uint8_t val);  // anything goes, no typing at all
 | 1-2 | The API is completely opaque. `write_reg(0x00, 0x03)` — requires memorizing the datasheet. |
 
 **How to improve:**
-- Every `@code` example in Doxygen must use typed vocabulary first: `radio.write_reg(cfg)` not `radio.write_reg(0x00, 0x03)`.
+- Every `@code` example in documentation must use typed vocabulary first: `radio.write_reg(cfg)` not `radio.write_reg(0x00, 0x03)`. For C/C++ projects, this applies to Doxygen `@code` blocks.
 - Parameters should have types that document their purpose: `DataRate` not `uint8_t rate`.
 - Use aggregate initialization for register structs: `Config{.en_crc = true}` not constructor with positional args.
 - Provide `format()` methods that produce human-readable debug output.

@@ -27,7 +27,7 @@ Checks that can be verified by automated tooling. No human judgement required.
 | # | Check | Method | Fail Condition |
 |---|-------|--------|----------------|
 | T1.1 | Build passes | Project build command | Exit code ≠ 0 or any warning |
-| T1.2 | Doxygen on public symbols | Grep every new/changed function, struct, enum, method for `/**` block with `@brief` | Missing `@brief` on any public symbol |
+| T1.2 | Doc-standard on public symbols | Per language-specific doc-standard skill (e.g. `doxygen-cpp`, `jsdoc`, `sphinx`). Grep every new/changed function, struct, enum, method for doc comment block | Missing doc-standard comment on any public symbol |
 | T1.3 | No decision references | Grep for `D-\d`, `F-\d`, `(decision` patterns in source files | Any match |
 | T1.4 | No changelog-style comments | Grep for `replaces the`, `was previously`, `formerly`, `old`, `refactored from` in source files | Any match |
 | T1.5 | No raw integers in public API where typed vocabulary exists | Every parameter in public API with a finite set of legal values must use a typed enum or struct | Public raw-type param with no typed alternative |
@@ -65,7 +65,7 @@ Checks that require deep domain expertise — datasheet fidelity, protocol corre
 | T3.5 | Documentation completeness | Learning docs, INDEX.md, verified references | Missing or unverified doc |
 | T3.6 | Full architecture review | SOLID, HAL sufficiency, namespace hygiene, component CMake | Architecture violation |
 
-**Who runs T3:** All six specialist agents (Software Engineer, Hardware Engineer, Wireless Expert, Security Reviewer, Test Engineer, Docs Writer).
+**Who runs T3:** All dispatched specialist agents per the task-driven specialist roster (see `skills/core/pipeline/SKILL.md § Task Domain Classification`). The roster is determined by task scope — it is NOT a fixed set of 6.
 
 ### T-ARCH — Architecture + Principles Review
 
@@ -140,8 +140,8 @@ Gates are mandatory checkpoints at phase transitions. Work cannot proceed past a
 |----------|-------|
 | Location | Between Phase A and Phase B |
 | Tiers | T3 + T-ARCH |
-| Who runs | All 6 specialists (T3), Software Engineer (T-ARCH) |
-| Pass | All 6 issue APPROVED or CONDITIONAL PASS + T-ARCH passes |
+| Who runs | All dispatched specialists (T3), Software Engineer (T-ARCH) |
+| Pass | All dispatched issue APPROVED or CONDITIONAL PASS + T-ARCH passes + every resolved decision has an ADR file |
 | Fail | Any REJECTED → loop back to Phase A with critique |
 | Retry budget | 3 loops at T3, 3 loops at T-ARCH (independent) |
 
@@ -173,8 +173,8 @@ Gates are mandatory checkpoints at phase transitions. Work cannot proceed past a
 |----------|-------|
 | Location | After Phase C specialist review, before git commit |
 | Tiers | T1 re-run + T3 + T-ARCH |
-| Who runs | Code Architect (T1), All 6 specialists (T3), Software Engineer (T-ARCH) |
-| Pass | T1 passes AND all 6 APPROVED AND T-ARCH passes |
+| Who runs | Code Architect (T1), All dispatched specialists (T3), Software Engineer (T-ARCH) |
+| Pass | T1 passes AND all dispatched APPROVED AND T-ARCH passes |
 | Fail | Tier-specific routing, independent retry counters |
 | Retry budget | 3 loops per tier (independent) |
 

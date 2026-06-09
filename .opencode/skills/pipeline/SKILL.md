@@ -16,6 +16,44 @@ This skill defines the complete pipeline workflow that all agents must follow. I
 
 ---
 
+## Task Domain Classification
+
+Before dispatching Phase A, the Supreme Leader MUST classify the task scope to determine which specialists are required. The specialist roster is **task-driven**, not a fixed set of 6.
+
+### Default Specialists (Always Required)
+
+These specialists participate in every task regardless of domain:
+
+- **SW Engineer** — architecture, API design, HAL interfaces
+- **Test Engineer** — test strategy, coverage, edge cases
+- **Docs Writer** — documentation plan, cross-document consistency
+
+### Domain-Conditional Specialists
+
+Additional specialists are dispatched based on task scope:
+
+| Domain Signal | Required Specialist |
+|---------------|-------------------|
+| Task touches hardware, registers, GPIO, timers, peripherals | Hardware Engineer |
+| Task touches wireless, RF, BLE, radio protocols, channels | Wireless Expert |
+| Task touches auth, secrets, crypto, network, input parsing | Security Reviewer |
+| Task touches UI, frontend, dashboard, screens, UX | **Product Designer** + **UX Engineer** |
+| Task produces frontend code (HTML/CSS/JS/TSX/React/Vue/etc.) | **UI Engineer** (Phase B) |
+
+### Specialist Roster Rule
+
+The specialist count is **not** fixed at 6. It is determined by task scope:
+- Minimum: 3 (SW Engineer, Test Engineer, Docs Writer)
+- With hardware: +1 (HW Engineer)
+- With wireless: +1 (Wireless Expert)
+- With security: +1 (Security Reviewer) — automatically included if wireless or network is in scope
+- With UI/UX: +3 (Product Designer, UX Engineer, UI Engineer)
+- Maximum: 8 (all specialists)
+
+The Supreme Leader MUST document the specialist roster in the passport's Required Steps section before A1 dispatch. A-GATE and C-GATE criteria adapt to the actual roster — all dispatched specialists must approve.
+
+---
+
 ## Phase Definitions
 
 ### Phase A — Requirements & Design
@@ -26,13 +64,53 @@ This skill defines the complete pipeline workflow that all agents must follow. I
 
 | Step | Name | Description | Who |
 |------|------|-------------|-----|
-| A0 | Task Definition | Produce detailed task specification: acceptance criteria, files, constraints, test strategy, doc plan | All agents collaborate |
-| A1 | Parallel Specialist Review | All 6 specialists review the proposal independently | SW Engineer, HW Engineer, Wireless Expert, Security Reviewer, Test Engineer, Docs Writer |
+| A0 | Task Definition | Produce detailed task specification: acceptance criteria, files, constraints, test strategy, doc plan. **Classify task domain** to determine specialist roster. | All agents collaborate |
+| A1 | Parallel Specialist Review | All applicable specialists review the proposal independently, per the task-driven specialist roster | Specialist roster per Task Domain Classification |
 | A2 | Dual-Model Challenge | Two model passes review architecture: primary produces, challenger critiques | Supreme Leader orchestrates |
-| A3 | A-GATE | T3 + T-ARCH compliance check | All 6 specialists (T3), SW Engineer (T-ARCH) |
+| A2a | ADR Creation | Every resolved design decision from A2 MUST have an ADR file created at `docs/adr/<adr-id>.md`. Use `node docs/project-management/next-id.mjs adr` to get the next ADR sequence number. | SW Engineer (writes), Docs Writer (reviews) |
+| A3 | A-GATE | T3 + T-ARCH compliance check | All dispatched specialists (T3), SW Engineer (T-ARCH) |
 
-**A-GATE pass criteria:** All 6 specialists issue APPROVED or CONDITIONAL PASS + T-ARCH passes.
+**A-GATE pass criteria:** All dispatched specialists issue APPROVED or CONDITIONAL PASS + T-ARCH passes + every resolved decision has an ADR file.
 **A-GATE fail:** Any REJECTED → producing agent runs `post-rejection-correction` protocol first, then loop back to A1 with specific critique (max 3 loops at T3).
+
+### A2a — ADR Creation Protocol
+
+After the Dual-Model Challenge synthesis is complete, every resolved design decision MUST have a corresponding Architecture Decision Record.
+
+**ADR file location:** `docs/adr/<adr-id>.md`
+
+**ADR sequence number:** Use the provided script to get the next ADR ID:
+```bash
+node docs/project-management/next-id.mjs adr
+```
+This returns a JSON object with the next ADR ID (e.g. `"psc-adr-0001"`). Use this ID as the filename.
+
+**Who creates ADRs:** SW Engineer writes each ADR file. Docs Writer reviews for completeness, clarity, and cross-references.
+
+**ADR minimum structure:**
+```markdown
+# ADR: <Title>
+
+**Status:** Accepted
+**Date:** <YYYY-MM-DD>
+**Decision:** <one-sentence summary>
+
+## Context
+What problem are we solving? What constraints exist?
+
+## Considered Alternatives
+| Option | Pros | Cons |
+|--------|------|------|
+| ... | ... | ... |
+
+## Decision
+What we chose and why.
+
+## Consequences
+What becomes easier, harder, or blocked by this decision.
+```
+
+**A-GATE check:** The Supreme Leader verifies that every resolved decision from the A2 synthesis has a corresponding ADR file at `docs/adr/`. Missing ADRs → A-GATE fail with critique "missing ADR for decision <X>".
 
 **User-prompted-twice signal:** If the user provides clarification or requirements during Phase A that the agent should have asked for, this is a Phase A quality failure. The agent did not apply `assumption-trap` correctly or asked an insufficient range of questions. Treat it the same as a gate rejection: run the `post-rejection-correction` protocol (maps to RC-2: Missing Question Category) before continuing. The user should never need to volunteer requirements — the agent must ask.
 
@@ -56,7 +134,7 @@ This skill defines the complete pipeline workflow that all agents must follow. I
 
 ### Phase C — Multi-Agent Verify
 
-**Goal:** Final check before commit. ALL specialist agents must approve.
+**Goal:** Final check before commit. ALL dispatched specialists must approve.
 
 **Sub-steps:**
 
@@ -64,10 +142,10 @@ This skill defines the complete pipeline workflow that all agents must follow. I
 |------|------|-------------|-----|
 | C0 | T1 Re-run | Mechanical compliance re-check on final codebase | Code Architect |
 | C1 | Dual-Model Challenge (Verification) | Primary verifier + challenger verifier | Supreme Leader orchestrates |
-| C2 | Parallel Specialist Approval | All 6 specialists review independently | All 6 specialists |
-| C3 | C-GATE | T1 re-run + T3 + T-ARCH | Code Architect (T1), Specialists (T3), SW Engineer (T-ARCH) |
+| C2 | Parallel Specialist Approval | All dispatched specialists review independently | All dispatched specialists |
+| C3 | C-GATE | T1 re-run + T3 + T-ARCH | Code Architect (T1), Dispatched specialists (T3), SW Engineer (T-ARCH) |
 
-**C-GATE pass criteria:** T1 passes + all 6 APPROVED + T-ARCH passes.
+**C-GATE pass criteria:** T1 passes + all dispatched specialists APPROVED + T-ARCH passes.
 
 ---
 
@@ -79,23 +157,23 @@ This skill defines the complete pipeline workflow that all agents must follow. I
                                     ┌───────────────────────────────────────────────┐
                                     │                                               │
                                     ▼                                               │
-┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐│
-│  A0:Task │───▶│A1:Review│───▶│A2:Dual │───▶│A3:A-GATE│───▶│ B1:PLAN │───▶│B2:APPLY ││
-│  Def     │    │Parallel │    │Challenge│   │T3+T-ARCH│    │         │    │ (unit)  ││
-└─────────┘    └─────────┘    └─────────┘    └────┬────┘    └─────────┘    └────┬────┘│
-                                                     │                              │     │
-                                                     │ FAIL (3× T3 or T-ARCH)        │     │
-                                                     │ ┌───────────────────────────┘  │     │
-                                                     │ │  PASS                         │     │
-                                                     ▼ ▼                              ▼     │
-                                               ┌──────────┐                    ┌──────────┐ │
-                                               │A1:Review │◀──── 3×T3 ────   │B2a:UNIT  │ │
-                                               │(loop back│                   │GATE      │ │
-                                               │ with cri-│                   │T1+T-ARCH │ │
-                                               │ tique)    │                   └────┬─────┘ │
-                                               └──────────┘                        │       │
-                                                                                   │       │
-                                                         PASS ────────────────────┘       │
+┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐│
+│  A0:Task │───▶│A1:Review│───▶│A2:Dual │───▶│A2a:ADRs │───▶│A3:A-GATE│───▶│ B1:PLAN │───▶│B2:APPLY ││
+│  Def     │    │Parallel │    │Challenge│    │Create   │    │T3+T-ARCH│    │         │    │ (unit)  ││
+└─────────┘    └─────────┘    └─────────┘    └─────────┘    └────┬────┘    └─────────┘    └────┬────┘│
+                                                                  │                              │     │
+                                                                  │ FAIL (3× T3 or T-ARCH)        │     │
+                                                                  │ ┌───────────────────────────┘  │     │
+                                                                  │ │  PASS                         │     │
+                                                                  ▼ ▼                              ▼     │
+                                                            ┌──────────┐                    ┌──────────┐ │
+                                                            │A1:Review │◀──── 3×T3 ────   │B2a:UNIT  │ │
+                                                            │(loop back│                   │GATE      │ │
+                                                            │ with cri-│                   │T1+T-ARCH │ │
+                                                            │ tique)    │                   └────┬─────┘ │
+                                                            └──────────┘                        │       │
+                                                                                                 │       │
+                                                                      PASS ────────────────────┘       │
                                                                                            │
                                                                                    ┌───────▼──────┐
                                                                                    │More units?   │
@@ -155,11 +233,12 @@ This skill defines the complete pipeline workflow that all agents must follow. I
 
 | From State | Event | To State | Condition |
 |-----------|-------|----------|-----------|
-| A0 | Task defined | A1 | All agents have task spec |
-| A1 | Reviews complete | A2 | All 6 specialists reviewed |
-| A2 | Challenge complete | A3 | Synthesis produced |
-| A3 | A-GATE passes | B1 | All specialists APPROVED/CONDITIONAL PASS + T-ARCH passes |
-| A3 | A-GATE fails | A1 | REJECTED or T-ARCH fail; loop back with critique (max 3×) |
+| A0 | Task defined | A1 | Task domain classified, specialist roster determined |
+| A1 | Reviews complete | A2 | All dispatched specialists reviewed |
+| A2 | Challenge complete | A2a | Synthesis produced, decisions identified |
+| A2a | ADRs created | A3 | ADR file exists for every resolved decision |
+| A3 | A-GATE passes | B1 | All dispatched specialists APPROVED/CONDITIONAL PASS + T-ARCH passes + ADRs present |
+| A3 | A-GATE fails | A1 | REJECTED or T-ARCH fail or missing ADR; loop back with critique (max 3×) |
 | B1 | Plan complete | B2 | Logical units identified |
 | B2 | Unit implemented | B2a | Build passes locally |
 | B2a | B-UNIT-GATE passes | B2 (next unit) | T1 + T-ARCH pass |
@@ -170,8 +249,8 @@ This skill defines the complete pipeline workflow that all agents must follow. I
 | C0 | T1 re-run passes | C1 | All T1 checks pass |
 | C0 | T1 re-run fails | B2 (fix) | Code Architect fixes; re-run T1 (max 3×) |
 | C1 | Challenge complete | C2 | Synthesis produced |
-| C2 | Reviews complete | C3 | All 6 specialists reviewed |
-| C3 | C-GATE passes | COMMIT | All APPROVED + T1 pass + T-ARCH pass |
+| C2 | Reviews complete | C3 | All dispatched specialists reviewed |
+| C3 | C-GATE passes | COMMIT | All dispatched APPROVED + T1 pass + T-ARCH pass |
 | C3 | C-GATE fails | C0 or C2 or B2 | T1 fail → C0 (Code Architect fixes, re-run T1); T3 fail → C2 (specialist re-review); T-ARCH fail → Software Engineer (architectural fix) |
 | Any | 3 retries exhausted at any tier | ESCALATE | Supreme Leader presents full violation report to user |
 
@@ -283,7 +362,7 @@ Which agent handles which intent:
 | Implementation | Code Architect | pau-loop, incremental-execution, compliance-gate |
 | T1 compliance check | Code Architect | compliance-gate, verification-before-completion |
 | T2 architectural review | Software Engineer | compliance-gate, type-design-review |
-| T3 semantic review | All 6 specialists | compliance-gate, domain-specific skills |
+| T3 semantic review | All dispatched specialists | compliance-gate, domain-specific skills |
 | T-ARCH review | Software Engineer | compliance-gate, type-design-review |
 | Memory safety review | Memory Safety | assumption-trap, memory-safety |
 | Gate orchestration | Supreme Leader | pipeline, compliance-gate, flag-protocol |

@@ -74,11 +74,8 @@ PLAN ──→ APPLY ──→ VALIDATE
 ### Per-Unit Cycle
 
 1. Implement the unit
-2. Run build validation:
-   ```bash
-   source ~/.espressif/tools/activate_idf_v6.0.1.sh && idf.py build
-   ```
-3. Must exit 0 with **zero warnings** (`-Werror` is active)
+2. Run build validation (project build command from AGENTS.md)
+3. Must exit 0 with **zero warnings** (`-Werror` is active if configured)
 4. If build fails → fix before proceeding to next unit
 5. Report: "Unit N complete. Build passes. Moving to unit N+1."
 
@@ -86,7 +83,7 @@ PLAN ──→ APPLY ──→ VALIDATE
 - NEVER implement multiple units before validating
 - NEVER skip the build check
 - If a unit introduces a design question → HALT (assumption-trap)
-- All new public symbols MUST have Doxygen before build
+- All new public symbols MUST have doc-standard comments before build (e.g. Doxygen for C/C++, JSDoc for JavaScript)
 
 ---
 
@@ -96,9 +93,9 @@ PLAN ──→ APPLY ──→ VALIDATE
 
 ### Steps
 
-1. Final build check: `idf.py build` exits 0
+1. Final build check exits 0
 2. Walk through each acceptance criterion — cite the code that satisfies it
-3. Verify Doxygen on all new public symbols
+3. Verify doc-standard comments on all new public symbols
 4. Verify no magic numbers in public API
 5. Report completion with AC evidence
 

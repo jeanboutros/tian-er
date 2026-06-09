@@ -43,10 +43,19 @@ Every step the pipeline requires for this task. Steps are checked off sequential
 
 ### Phase A — Requirements & Design
 
-- [ ] A0: Task Definition — acceptance criteria, files, constraints, test strategy, doc plan
-- [ ] A1: Specialist Review — all 6 specialists review independently
+- [ ] A0: Task Definition — acceptance criteria, files, constraints, test strategy, doc plan. **Domain classification:** ________ | **Roster:** ________
+- [ ] A1: Specialist Review — all dispatched specialists review independently
+  - [ ] A1-SW: Software Engineer
+  - [ ] A1-TX: Test Engineer
+  - [ ] A1-DX: Docs Writer
+  - [ ] A1-HW: Hardware Engineer (conditional — if hardware in scope)
+  - [ ] A1-WX: Wireless Expert (conditional — if wireless/RF in scope)
+  - [ ] A1-SX: Security Reviewer (conditional — if security in scope)
+  - [ ] A1-PD: Product Designer (conditional — if UI/UX in scope)
+  - [ ] A1-UX: UX Engineer (conditional — if UI/UX in scope)
 - [ ] A2: Dual-Model Challenge — primary pass + challenger pass
-- [ ] A3: A-GATE — T3 ✅/❌ | T-ARCH ✅/❌ | Verdict: _______
+- [ ] A2a: ADR Creation — ADR file for every resolved design decision
+- [ ] A3: A-GATE — T3 ✅/❌ | T-ARCH ✅/❌ | ADRs present ✅/❌ | Verdict: _______
 
 ### Phase B — Build (PAU Loop)
 
@@ -62,7 +71,7 @@ Every step the pipeline requires for this task. Steps are checked off sequential
 
 - [ ] C0: T1 Re-run — all T1 checks pass
 - [ ] C1: Dual-Model Challenge (Verification) — primary + challenger
-- [ ] C2: Specialist Approval — all 6 specialists
+- [ ] C2: Specialist Approval — all dispatched specialists
 - [ ] C3: C-GATE — T1 ✅/❌ | T3 ✅/❌ | T-ARCH ✅/❌ | Verdict: _______
 
 ### Commit
@@ -77,14 +86,17 @@ Every step execution is logged here with timestamp, agent, and result.
 |------|-------|-----------|--------|-------|
 | A0 | _______ | _______ | _______ | _______ |
 | A1-SW | software-engineer | _______ | APPROVED/CONDITIONAL PASS/REJECTED | _______ |
+| A1-TX | test-engineer | _______ | APPROVED/CONDITIONAL PASS/REJECTED | _______ |
+| A1-DX | docs-writer | _______ | APPROVED/CONDITIONAL PASS/REJECTED | _______ |
 | A1-HW | hardware-engineer | _______ | APPROVED/CONDITIONAL PASS/REJECTED | _______ |
 | A1-WX | wireless-expert | _______ | APPROVED/CONDITIONAL PASS/REJECTED | _______ |
 | A1-SX | security-reviewer | _______ | APPROVED/CONDITIONAL PASS/REJECTED | _______ |
-| A1-TX | test-engineer | _______ | APPROVED/CONDITIONAL PASS/REJECTED | _______ |
-| A1-DX | docs-writer | _______ | APPROVED/CONDITIONAL PASS/REJECTED | _______ |
+| A1-PD | product-designer | _______ | APPROVED/CONDITIONAL PASS/REJECTED | _______ |
+| A1-UX | ux-engineer | _______ | APPROVED/CONDITIONAL PASS/REJECTED | _______ |
 | A2-Primary | _______ | _______ | _______ | _______ |
 | A2-Challenger | _______ | _______ | _______ | _______ |
-| A3-Gate | supreme-leader | _______ | PASS/FAIL | T3: __ T-ARCH: __ |
+| A2a-ADR | _______ | _______ | _______ | _______ |
+| A3-Gate | supreme-leader | _______ | PASS/FAIL | T3: __ T-ARCH: __ ADRs: __ |
 | ... | ... | ... | ... | ... |
 
 ## Gate Results

@@ -21,7 +21,8 @@ When first dispatched, this agent MUST:
 1. Load core skills: assumption-trap, pau-loop, incremental-execution, compliance-gate, pipeline, review-confidence, flag-protocol, self-audit-checklist, verification-before-completion
 2. Read the tech stack from AGENTS.md (build command, framework, target platform, component list)
 3. Load domain skills matching tech stack entries (e.g. if AGENTS.md lists a hardware component, load its datasheet skill; if it lists a framework, load its skill; etc.)
-4. Load role-specific skills: test-driven-development, systematic-debugging
+4. Load the language-specific doc-standard skill (e.g. `doxygen-cpp` for C/C++)
+5. Load role-specific skills: test-driven-development, systematic-debugging
 
 ## State Machine
 Every dispatch carries a structured envelope:
@@ -76,7 +77,7 @@ The Code Architect is responsible for mechanical compliance checks at unit and f
 
 ### From project standards (enforced by AGENTS.md):
 - **Typed enums** — Every field with finite legal values uses `enum class`, not raw int
-- **Doxygen** — Every new public symbol has `/** @brief ... */`
+- **Doc-standard** — Every new public symbol has a doc comment per the language-specific doc-standard skill (e.g. `doxygen-cpp` for C/C++, `jsdoc` for JavaScript)
 - **No raw integers** — API uses named constants, never magic numbers
 - **HAL decoupling** — Library headers include only standard C++ and own headers
 - **Datasheet fidelity** — Field names, bit positions, encodings from datasheet only

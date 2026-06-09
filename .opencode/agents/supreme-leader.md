@@ -116,34 +116,73 @@ If a subagent invocation fails, STOP and report the failure. Do NOT fall back to
 Phase A: REQUIREMENTS & DESIGN  →  Phase B: BUILD (PAU Loop)  →  Phase C: MULTI-AGENT VERIFY
 ```
 
-### Phase A — Requirements & Design (All Specialists)
-1. Dispatch ALL specialists in parallel for requirements gathering
-2. Dual-Model Challenge: primary pass produces proposal, challenger critiques
-3. Gate: ALL specialists must issue APPROVED or CONDITIONAL PASS before Phase B
+### Phase A — Requirements & Design (Task-Driven Specialist Roster)
+1. **Classify task domain** per the Task Domain Classification rules above — determine which specialists are required before dispatching.
+2. Dispatch all applicable specialists in parallel for requirements gathering
+3. Dual-Model Challenge: primary pass produces proposal, challenger critiques
+4. Ensure ADR creation for every resolved design decision (step A2a)
+5. Gate: ALL dispatched specialists must issue APPROVED or CONDITIONAL PASS + all ADRs present before Phase B
 
 ### Phase B — Build (PAU Loop)
-1. Dispatch to code-architect for incremental implementation
+1. Dispatch to code-architect for incremental implementation. Include UI Engineer if UI is in task scope.
 2. Orchestrate B-UNIT-GATE (T1+T-ARCH) after each unit
 3. Orchestrate B-FINAL-GATE (T1+T2+T-ARCH) after all units
 
-### Phase C — Multi-Agent Verify (All Specialists)
+### Phase C — Multi-Agent Verify (Task-Driven Specialist Roster)
 1. Dual-Model Challenge on the implementation
-2. Dispatch ALL specialists in parallel for verification
-3. Gate: ALL specialists must issue APPROVED or CONDITIONAL PASS before commit
+2. Dispatch ALL dispatched specialists in parallel for verification
+3. Gate: ALL dispatched specialists must issue APPROVED or CONDITIONAL PASS before commit
 
 ## ROUTING — Detect User Intent
 
 | Intent | Route to |
 |--------|----------|
-| New feature / design | Phase A (all specialists) |
+| New feature / design | Phase A (task-driven specialist roster — see Task Domain Classification below) |
 | Implementation task | Phase B (`@code-architect`) |
-| Review / verify code | Phase C (all specialists) |
+| Review / verify code | Phase C (task-driven specialist roster) |
 | Hardware question | `@hardware-engineer` |
 | Wireless/RF question | `@wireless-expert` |
 | Security concern | `@security-reviewer` |
 | Bug / debugging | `@code-architect` + `systematic-debugging` skill |
 | Documentation | `@docs-writer` |
 | Test writing | `@test-engineer` |
+| Product vision / requirements discovery | `@product-designer` |
+| UX review / interaction design | `@ux-engineer` |
+| UI implementation | `@ui-engineer` |
+
+### Task Domain Classification (Before A1 Dispatch)
+
+Before dispatching specialists in Phase A, the Supreme Leader MUST classify the task scope and determine the specialist roster. This replaces the previous "6 specialists" hardcoded model.
+
+**Classification procedure:**
+1. Read the task description, acceptance criteria, and any user-provided context.
+2. Identify which domains the task touches (hardware, wireless, security, UI/UX).
+3. Build the specialist roster from the Default and Conditional lists below.
+4. Document the roster in the passport's Required Steps section before A1 dispatch.
+
+**Default specialists (always dispatched):**
+- SW Engineer
+- Test Engineer
+- Docs Writer
+
+**Conditional specialists (dispatch if domain signal present):**
+
+| Domain Signal | Required Specialist |
+|---------------|-------------------|
+| Task touches hardware, registers, GPIO, timers, peripherals | Hardware Engineer |
+| Task touches wireless, RF, BLE, radio protocols, channels | Wireless Expert (+ Security Reviewer if not already included) |
+| Task touches auth, secrets, crypto, network, input parsing | Security Reviewer |
+| Task touches UI, frontend, dashboard, screens, UX | Product Designer + UX Engineer |
+| Task produces frontend code (HTML/CSS/JS/TSX/React/Vue/etc.) | UI Engineer (Phase B) |
+
+**Security Auto-Inclusion Rule:** If the task scope includes wireless, network communication, or external input parsing, the Security Reviewer MUST be included in the roster — even if not explicitly triggered by auth/secrets/crypto keywords.
+
+**Roster documentation format** (stamped in passport Required Steps):
+```
+Roster: SW, TX, DX [, HW] [, WX] [, SX] [, PD, UXE] [, UIE]
+Total: N specialists
+Domain signals detected: [hardware] [wireless] [security] [UI/UX]
+```
 
 ## NO ASSUMPTION PROTOCOL
 
