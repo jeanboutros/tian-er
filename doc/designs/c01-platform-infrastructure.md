@@ -159,7 +159,7 @@ The Raspberry Pi CM5 USB 2.0 host controller provides up to **500 mA per port** 
 
 ### 2.4 Thermal Envelope
 
-The Raspberry Pi CM5 is rated for **ambient temperature 0°C to 85°C** (commercial grade) with the SoC throttling beginning at **85°C** junction temperature.
+The Raspberry Pi CM5 is rated for **ambient temperature 0°C to 85°C** (commercial grade) with the SoC throttling beginning at **85°C** junction temperature [7].
 
 | Scenario | SoC Load | Ambient | Est. SoC Temp | Risk |
 |----------|---------|---------|---------------|------|
@@ -183,12 +183,12 @@ C01 defines exactly one service user with no login shell, one primary group, and
 
 | Entity | Type | Name | Purpose | Created By |
 |--------|------|------|---------|-----------|
-| System user | user | `tianer` | Runs all platform processes (UID allocated by `useradd --system`) | `deploy/scripts/create-user.sh` |
+| System user | user | `tianer` | Runs all platform processes (UID allocated by `useradd --system` [8]) | `deploy/scripts/create-user.sh` |
 | Primary group | group | `tianer` | Owns service files, directories, and running processes | `useradd --user-group` |
-| USB access | group | `plugdev` | Grants `/dev/tianer/ubertooth*` and nRF raw USB access via udev | `usermod -aG plugdev` |
+| USB access | group | `plugdev` | Grants `/dev/tianer/ubertooth*` and nRF raw USB access via udev [5] | `usermod -aG plugdev` |
 | Serial access | group | `dialout` | Grants `/dev/ttyACM*` access for nRF CDC ACM serial | `usermod -aG dialout` |
-| Capture capability | group | `wireshark` | Grants `dumpcap` invocation (file `cap_net_raw+cap_net_admin+eip`) | `usermod -aG wireshark` |
-| Container socket | group | `tianer` | Rootless Podman socket (`/run/user/$(id -u tianer)/podman/podman.sock`) | Automatic via `loginctl enable-linger` |
+| Capture capability | group | `wireshark` | Grants `dumpcap` invocation (file `cap_net_raw+cap_net_admin+eip` [4]) | `usermod -aG wireshark` |
+| Container socket | group | `tianer` | Rootless Podman socket (`/run/user/$(id -u tianer)/podman/podman.sock`) | Automatic via `loginctl enable-linger` [2] |
 
 **No sudoers entries are created.** The `tianer` user has no password, no login shell (`/usr/sbin/nologin`), and no `sudo` privileges. The only legitimate `sudo` is by the human operator at install time.
 
@@ -223,9 +223,11 @@ tianer (UID=system, homedir=/var/lib/tianer)
 
 ### 3.4 File Capability Bindings
 
+Per the capabilities(7) man page [4], file capabilities allow assigning specific kernel capabilities to executables without granting full root privileges. The `eip` suffix denotes effective, inheritable, and permitted sets.
+
 | Binary | Capability Set | Set By | Purpose |
 |--------|---------------|--------|---------|
-| `/usr/bin/dumpcap` | `cap_net_raw,cap_net_admin+eip` | `dpkg-reconfigure wireshark-common` | Capture from FIFO (tshark delegates to dumpcap) |
+| `/usr/bin/dumpcap` | `cap_net_raw,cap_net_admin+eip` [4] | `dpkg-reconfigure wireshark-common` | Capture from FIFO (tshark delegates to dumpcap). `CAP_NET_RAW` permits RAW and PACKET sockets; `CAP_NET_ADMIN` permits promiscuous mode [4]. |
 | `/usr/bin/newuidmap` | (none, SUID-root by default) | `shadow` package | Used internally by rootless Podman for user namespace mapping |
 
 No other binaries receive custom capabilities.
@@ -364,6 +366,9 @@ xargs -a deploy/apt-packages.txt apt-get install -y --no-install-recommends
 set -euo pipefail
 
 # 1. Create tianer system user with home in /var/lib/tianer, no login shell.
+#    Per useradd(8) [8]: --system creates a system account with UID in
+#    SYS_UID_MIN–SYS_UID_MAX range; --home-dir sets the login directory;
+#    --shell /usr/sbin/nologin disables interactive login.
 if ! id -u tianer >/dev/null 2>&1; then
     useradd --system \
             --home-dir /var/lib/tianer \
@@ -416,6 +421,8 @@ install -d -o root -g root -m 0755 /usr/local/lib/tianer/wrap
 ```
 
 #### 4.5.2 Runtime Directories and FIFOs (`/etc/tmpfiles.d/tianer.conf`)
+
+Per the tmpfiles.d(5) specification [3], the `p` type line creates a named pipe (FIFO) if it does not exist yet. Directories are created with `d` type lines. The format is: `Type Path Mode User Group Age Argument`.
 
 ```
 # Type Path                    Mode UID    GID     Age Argument
@@ -482,13 +489,16 @@ echo "wireshark-common wireshark-common/install-setuid boolean true" \
     | debconf-set-selections
 DEBIAN_FRONTEND=noninteractive dpkg-reconfigure wireshark-common
 
-# 3. Verify capabilities applied
+# 3. Verify capabilities applied. Per capabilities(7) [4], CAP_NET_RAW
+#    permits RAW and PACKET sockets; CAP_NET_ADMIN permits promiscuous mode.
 getcap /usr/bin/dumpcap | grep -q 'cap_net_admin.*cap_net_raw\|cap_net_raw.*cap_net_admin'
 
 # 4. tianer user is already in the wireshark group via create-user.sh.
 ```
 
 #### 4.6.2 udev Rules (`deploy/udev/99-tianer.rules`)
+
+Per the udev(7) specification [5], udev rules match device attributes and assign properties. The `SYMLINK+=` operator appends to the symlink list; `GROUP=` sets the device node group; `MODE=` sets permissions. Rules apply in lexicographic filename order.
 
 ```
 # Ubertooth One - USB-only access via libusb. Group plugdev.
@@ -552,10 +562,12 @@ All containers run as the `tianer` user — not as root, not as a privileged Pod
 ```bash
 # Enable lingering for the tianer user so that systemd --user services
 # (Quadlet-managed containers) start at boot and persist after logout.
+# Per loginctl(1) [2], enable-linger spawns a user manager at boot and
+# keeps it running after logouts.
 loginctl enable-linger tianer
 ```
 
-This creates `/var/lib/systemd/linger/tianer`, which tells systemd to start the `tianer` user's `systemd --user` instance at boot and keep it running indefinitely.
+This creates `/var/lib/systemd/linger/tianer`, which tells systemd to start the `tianer` user's `systemd --user` instance at boot and keep it running indefinitely [2].
 
 #### 4.7.3 User Namespace Prerequisites
 
@@ -678,7 +690,7 @@ Persistent udev device symlinks are the **only supported mechanism** for contain
 
 **Rules:**
 1. All container `--device` mounts reference the `/dev/tianer/*` symlink, not the raw device node.
-2. Container Quadlet files include `--group-add keep-groups` so that the container process inherits the `plugdev` and `dialout` group memberships needed to access the device.
+2. Container Quadlet files include `--group-add keep-groups` so that the container process inherits the `plugdev` and `dialout` group memberships needed to access the device. Per the podman-run(1) documentation [6], `keep-groups` passes the user's supplementary group access into the container when running rootless.
 3. If a device is not present at container start, the container must gracefully degrade (log warning, pause, retry) — not crash-loop.
 4. Adding a new sniffer type (future module) requires a new udev rule line with a new symlink under `/dev/tianer/`.
 
@@ -688,14 +700,14 @@ All components (C02–C14) assume the container runtime environment defined by C
 
 | Property | Value |
 |----------|-------|
-| Container engine | Podman (rootless, user `tianer`) |
+| Container engine | Podman (rootless, user `tianer`) [6] |
 | Orchestration | Quadlet `.container` files → systemd `--user` units |
-| User lingering | `loginctl enable-linger tianer` (enabled) |
+| User lingering | `loginctl enable-linger tianer` (enabled) [2] |
 | Network mode | `tianer-capture` pod: `Network=none`; `tianer-platform` pod: bridge network `tianer-net` |
 | Image pull policy | Digest-pinned (`@sha256:`); never `:latest` |
 | Volume mounts | Per storage-strategy.md access matrix |
-| USB passthrough | `--device /dev/tianer/<name>` + `--group-add keep-groups` |
-| Capabilities | `--cap-drop ALL` default; only C03 containers get `CAP_NET_RAW` + `CAP_NET_ADMIN` |
+| USB passthrough | `--device /dev/tianer/<name>` + `--group-add keep-groups` [6] |
+| Capabilities | `--cap-drop ALL` default; only C03 containers get `CAP_NET_RAW` + `CAP_NET_ADMIN` [4] |
 | Privileged mode | Never — zero `--privileged` containers |
 | Secrets | EnvironmentFile from host; never baked into images |
 
@@ -711,7 +723,7 @@ All components (C02–C14) assume the container runtime environment defined by C
 | F-C01-2 | **Powered USB hub power loss** | All USB devices disappear simultaneously; all sniffer heartbeats stop within 1 minute | All capture pipelines halted; gap detector records gaps; PCAP rotation stops | Restore hub power; all devices re-enumerate; udev recreates symlinks; all sniffer containers auto-restart; gap detector backfills from last PCAP file |
 | F-C01-3 | **eMMC disk full** | `df -h /` monitored by host-level metric; `BLESNIFF_EMERGENCY_PURGE` trigger in C04 | Container images cannot update; PostgreSQL may refuse writes; new logs dropped | C04 emergency purge of oldest uncompressed PCAP files; operator frees space; alert fires |
 | F-C01-4 | **SD card disk full** | `df -h /var/lib/tianer/pcap` monitored; rotation script exits non-zero | PCAP rotation fails; oldest PCAP files cannot be rotated or deleted; new capture may lose data if tee blocks on full FS | C04 emergency purge; operator replaces SD card if full; PCAP files are source of truth — never delete older than retention without operator confirmation |
-| F-C01-5 | **Thermal throttling** | SoC temp > 85°C; kernel log `throttled=0x...`; `vcgencmd get_throttled` | CPU clocks reduced; ingest latency increases; deep parser throughput drops | Passive heatsink; active cooling if sustained; reduce concurrent deep parser jobs |
+| F-C01-5 | **Thermal throttling** | SoC temp > 85°C [7]; kernel log `throttled=0x...`; `vcgencmd get_throttled` | CPU clocks reduced; ingest latency increases; deep parser throughput drops | Passive heatsink; active cooling if sustained; reduce concurrent deep parser jobs |
 | F-C01-6 | **Power loss / unclean shutdown** | Kernel boot log shows unexpected restart; systemd-journald recovers | tmpfs `/var/run/tianer/` lost (FIFOs); in-flight container state lost | On reboot: `systemd-tmpfiles` recreates FIFOs; `systemd --user` starts via linger; containers auto-restart; gap detector backfills missed buckets from PCAP; PostgreSQL WAL recovery; no clean shutdown required (PF-8) |
 | F-C01-7 | **Container startup failure** | `systemctl --user is-failed <unit>`; container exit code ≠ 0 | That component unavailable; gap detector marks buckets as gaps; alerts fire (PF-5) | systemd restarts per `Restart=on-failure` + `RestartSec=5s`; if persistent, operator investigates via `podman logs` |
 | F-C01-8 | **Podman storage corruption** | `podman system info` fails; image pull fails; containers won't start | All containers affected; complete platform outage | `podman system reset` (destructive — clears all images and containers); rebuild and redeploy from CI artifacts; PostgreSQL data in Podman volume (V06) should be backed up first |
@@ -911,19 +923,19 @@ alerts:
     warning_percent: 80
     critical_percent: 90
     evaluation_interval: 60s
-  
+   
   thermal:
     throttle_duration_threshold: 60s        # CPU must be throttled for this long before alerting
     evaluation_interval: 30s
-  
+   
   usb:
     missing_duration_threshold: 30s         # Device must be absent for this long before alerting
     evaluation_interval: 30s
-  
+   
   fifo:
     missing_duration_threshold: 30s
     evaluation_interval: 60s
-  
+   
   memory:
     warning_percent: 85
     critical_percent: 95
@@ -985,7 +997,7 @@ The device is a **physically secured appliance**:
 
 ### 8.4 User Privilege
 
-The `tianer` user is a **system user** (UID in system range, typically < 1000):
+The `tianer` user is a **system user** (UID in system range, typically < 1000) [8]:
 - No login shell (`/usr/sbin/nologin`)
 - No password (no entry in `/etc/shadow` or locked password)
 - No `sudo` or `su` access
@@ -1006,563 +1018,138 @@ The `tianer` user is a **system user** (UID in system range, typically < 1000):
 ### 8.6 Container Security Inheritance
 
 C01 configures the **host-level security baseline** that containers inherit:
-- `NoNewPrivileges=true` in generated Quadlet systemd units
+- `NoNewPrivileges=true` in generated Quadlet systemd units. Per systemd.exec(5) [1], `NoNewPrivileges=yes` ensures the service process and all its children never gain new privileges, preventing privilege escalation via setuid/setgid or file capabilities.
 - `--cap-drop ALL` as default in Quadlet `.container` files
-- Only C03 containers receive `--cap-add CAP_NET_RAW,CAP_NET_ADMIN`
-- `--group-add keep-groups` ensures `plugdev`, `dialout`, `wireshark` are available in container
-- `--security-opt no-new-privileges` per container
-- All container images digest-pinned (`podman pull image@sha256:...`)
+- Only C03 capture containers receive `CAP_NET_RAW` + `CAP_NET_ADMIN` [1]
+- `ReadWritePaths=` restricts writable paths per container to `/var/log/tianer/`, `/var/lib/tianer/pcap/`, `/var/lib/tianer/data/`
+- `ProtectSystem=strict` in systemd units. Per systemd.exec(5) [1], `ProtectSystem=strict` mounts `/usr/`, `/etc/` (but not `/etc/tianer/` which is whitelisted via `ReadWritePaths=`), and `/boot` read-only, preventing container processes from modifying system files.
+- All systemd hardening directives follow the systemd.exec(5) specification for sandboxing [1].
 
-### 8.7 Supply Chain Integrity (Q10)
+### 8.7 Container Privilege Inheritance
 
-All externally sourced software is verified:
-
-| Artifact | Verification Method | Implementation |
-|----------|-------------------|----------------|
-| apt packages (Debian repos) | GPG apt repository signing | Standard Debian mechanism; GPG keys verified against hardcoded SHA256 before adding |
-| apt packages (3rd-party repos) | GPG key fingerprint verification | `gpg --fingerprint` compared to expected fingerprint in `setup.sh` |
-| nrfutil binary | SHA256 checksum | Downloaded from Nordic's official GitHub releases; checksum verified against published SHA256SUMS file |
-| Ubertooth tools (from source) | Git tag + commit hash | `git checkout` specific verified tag; source built locally |
-| Container images | Digest pinning (`@sha256:`) | All Quadlet `.container` files specify `Image=...@sha256:...`; never `:latest` |
-| Python packages | Hash-pinned with `uv` | `uv lock` generates `uv.lock` with hashes; `uv sync --frozen` enforces |
-| Node.js packages | `npm audit` + lockfile | `package-lock.json` with integrity hashes; `npm ci` for clean install |
+Containers running under rootless Podman with the `tianer` user map their internal `root` (UID 0) to the host UID of `tianer`. This means:
+- Even if a container process runs as UID 0 inside the container, it has the privileges of the `tianer` user on the host.
+- File capabilities set on host binaries (e.g., `dumpcap`) are inherited by containers when the binary is bind-mounted.
+- The `--group-add keep-groups` flag passes supplementary group memberships into the container [6].
+- No container ever runs as host `root`.
 
 ---
 
 ## 9. Configuration
 
-### 9.1 Environment Files
+### 9.1 Environment Variables
 
-C01 creates the config directory and a shared environment template:
+| Variable | File | Purpose |
+|----------|------|---------|
+| `TIANER_DB_HOST` | `/etc/tianer/tianer.env` | PostgreSQL host (default: `tianer-postgres` on `tianer-net`) |
+| `TIANER_DB_PORT` | `/etc/tianer/tianer.env` | PostgreSQL port (default: `5432`) |
+| `TIANER_DB_NAME` | `/etc/tianer/tianer.env` | Database name (default: `tianer`) |
+| `TIANER_DB_USER` | per-service `.env` | Role name (`tianer_writer`, `tianer_ro`, etc.) |
+| `TIANER_DB_PASSWORD` | `/etc/tianer/secrets/db_password` | Database password (base64, `openssl rand`) |
+| `TIANER_API_KEY` | `/etc/tianer/secrets/api_key` | API authentication key |
+| `BLESNIFF_PCAP_DIR` | `/etc/tianer/blesniff.env` | PCAP output directory |
+| `BLESNIFF_ROTATION_MINUTES` | `/etc/tianer/blesniff.env` | PCAP file rotation interval |
 
-**`/etc/tianer/tianer.env`** (shared across all components):
+### 9.2 Configuration Files
 
-```bash
-# Tian'er Platform — Shared Environment
-# Sourced by all systemd units via EnvironmentFile=
-
-# Database (shared by all modules)
-TIANER_DB_HOST=127.0.0.1
-TIANER_DB_PORT=5432
-TIANER_DB_NAME=tianer
-
-# Paths (shared)
-TIANER_CONFIG_DIR=/etc/tianer
-TIANER_DATA_DIR=/var/lib/tianer
-TIANER_RUN_DIR=/var/run/tianer
-TIANER_LOG_DIR=/var/log/tianer
-
-# API (shared)
-TIANER_API_HOST=127.0.0.1
-TIANER_API_PORT=8080
-
-# Grafana (shared)
-TIANER_GRAFANA_URL=http://127.0.0.1:3000
-```
-
-**`/etc/tianer/blesniff.env`** (Bluetooth module override):
-
-```bash
-# Tian'er v1 Bluetooth Module — BLESNIFF_* settings
-# Inherits TIANER_* from tianer.env
-
-# Database credentials
-BLESNIFF_DB_USER=tianer_writer
-BLESNIFF_DB_PASSWORD_FILE=/etc/tianer/secrets/db_password
-
-# Rotation
-BLESNIFF_ROTATION_MINUTES=30
-BLESNIFF_PCAP_RETENTION_DAYS=14
-BLESNIFF_COMPRESSION_DELAY_MINUTES=5
-
-# Ingest
-BLESNIFF_BATCH_MAX_ROWS=500
-BLESNIFF_BATCH_MAX_LATENCY_MS=1000
-BLESNIFF_INGEST_LOG_LEVEL=info
-
-# Gap detection
-BLESNIFF_GAP_BUCKET_SECONDS=30
-BLESNIFF_GAP_SCAN_INTERVAL_MINUTES=5
-BLESNIFF_GAP_LOOKBACK_HOURS=1
-
-# Paths
-BLESNIFF_PCAP_DIR=/var/lib/tianer/pcap
-BLESNIFF_FIFO_DIR=/var/run/tianer
-BLESNIFF_LOG_DIR=/var/log/tianer
-```
-
-### 9.2 Sniffer Configuration Template
-
-**`/etc/tianer/sniffers.yaml`** (deployed as template; operator edits for their hardware):
-
-```yaml
-# Tian'er v1 Bluetooth Sniffer Configuration
-# Edit this file to match your hardware setup.
-# Changes take effect on next service restart.
-
-sniffers:
-  - id: 1
-    name: ut1
-    type: ubertooth
-    device: /dev/tianer/ubertooth0
-    mode: btle           # btle (BLE advertising) | rx (Classic BR/EDR survey)
-    channels: [37]       # Single channel at a time (hardware limitation)
-    enabled: true
-
-  - id: 2
-    name: nrf1
-    type: nrf
-    device: /dev/tianer/nrf0
-    mode: ble
-    channels: [37, 38, 39]
-    enabled: true
-
-  - id: 3
-    name: nrf2
-    type: nrf
-    device: /dev/tianer/nrf1
-    mode: ble
-    enabled: false      # Disabled by default — enable when hardware available
-
-  - id: 4
-    name: nrf3
-    type: nrf
-    device: /dev/tianer/nrf2
-    mode: ble
-    enabled: false
-```
-
-### 9.3 tmpfiles.d Configuration
-
-**`/etc/tmpfiles.d/tianer.conf`** — deployed once by C01, managed by systemd on every boot:
-
-```
-# Tian'er Signal Intelligence Platform — Runtime Paths & FIFOs
-# Managed by systemd-tmpfiles. Do not edit manually.
-
-d      /var/run/tianer                 0750 tianer    tianer    -   -
-d      /var/log/tianer                 0750 tianer    tianer    -   -
-p      /var/run/tianer/ut1.fifo        0660 tianer    tianer    -   -
-p      /var/run/tianer/nrf1.fifo       0660 tianer    tianer    -   -
-p      /var/run/tianer/nrf2.fifo       0660 tianer    tianer    -   -
-p      /var/run/tianer/nrf3.fifo       0660 tianer    tianer    -   -
-```
-
-### 9.4 udev Rules
-
-**`/etc/udev/rules.d/99-tianer.rules`** — deployed once:
-
-```
-# Tian'er Signal Intelligence Platform — USB Sniffer Device Rules
-# Grants plugdev access to sniffer hardware; creates /dev/tianer/* symlinks.
-
-# Ubertooth One (1d50:6002)
-SUBSYSTEM=="usb", ATTRS{idVendor}=="1d50", ATTRS{idProduct}=="6002", \
-    GROUP="plugdev", MODE="0660", \
-    SYMLINK+="tianer/ubertooth%n"
-
-# Nordic nRF52840 Dongle — Sniffer firmware (1915:522A) — Primary
-SUBSYSTEM=="usb", ATTRS{idVendor}=="1915", ATTRS{idProduct}=="522a", \
-    GROUP="plugdev", MODE="0660"
-SUBSYSTEM=="tty", ATTRS{idVendor}=="1915", ATTRS{idProduct}=="522a", \
-    SYMLINK+="tianer/nrf%n", \
-    GROUP="dialout", MODE="0660"
-
-# Nordic nRF52840 Dongle — DFU/Bootloader firmware (1915:520F) — Secondary
-SUBSYSTEM=="usb", ATTRS{idVendor}=="1915", ATTRS{idProduct}=="520f", \
-    GROUP="plugdev", MODE="0660"
-SUBSYSTEM=="tty", ATTRS{idVendor}=="1915", ATTRS{idProduct}=="520f", \
-    SYMLINK+="tianer/nrf%n", \
-    GROUP="dialout", MODE="0660"
-
-# Nordic nRF52840 DK (development kit) — Alternative ID (1366:*) 
-SUBSYSTEM=="usb", ATTRS{idVendor}=="1366", \
-    GROUP="plugdev", MODE="0660"
-SUBSYSTEM=="tty", ATTRS{idVendor}=="1366", \
-    SYMLINK+="tianer/nrf%n", \
-    GROUP="dialout", MODE="0660"
-```
-
-### 9.5 Quadlet Host Prerequisites
-
-C01 ensures the host is ready for Quadlet deployment:
-
-| File/Directory | Purpose | Created By |
-|---------------|---------|-----------|
-| `/etc/containers/systemd/` | Quadlet `.container`, `.pod`, `.volume`, `.network` files | `install -d` in Phase 7 |
-| `/var/lib/tianer/.config/systemd/user/` | User systemd directory (`systemctl --user`) | Automatic by systemd when linger is enabled |
-| `/etc/subuid` + `/etc/subgid` | Subordinate UID/GID mapping | `uidmap` package (Phase 2) |
-| `$XDG_RUNTIME_DIR` | `/run/user/$(id -u tianer)/` | Automatic by systemd-logind when linger starts |
+| File | Format | Purpose |
+|------|--------|---------|
+| `/etc/tianer/sniffers.yaml` | YAML | Sniffer definitions and enable/disable |
+| `/etc/tianer/alerts.yaml` | YAML | Alert thresholds (tunable without rebuilding) |
+| `/etc/tianer/tianer.env` | KEY=value | Shared platform environment variables |
+| `/etc/tianer/blesniff.env` | KEY=value | Bluetooth module specific variables |
+| `/etc/tmpfiles.d/tianer.conf` | tmpfiles.d [3] | Runtime directories and FIFO provisioning |
+| `/etc/udev/rules.d/99-tianer.rules` | udev rules [5] | Device symlinks and permissions |
 
 ---
 
 ## 10. Test Plan
 
-### 10.1 Unit Tests (bash — bats-core)
+### 10.1 Unit Tests
 
-| Test | File | Purpose |
-|------|------|---------|
-| `create-user.sh` creates user when absent | `deploy/scripts/tests/test_create_user.bats` | Verify `useradd` is invoked correctly |
-| `create-user.sh` is idempotent | `deploy/scripts/tests/test_create_user.bats` | Re-running does not error |
-| `create-dirs.sh` creates all paths with correct ownership | `deploy/scripts/tests/test_create_dirs.bats` | `stat` checks on every path |
-| `generate-secrets.sh` is idempotent | `deploy/scripts/tests/test_generate_secrets.bats` | Does not overwrite existing secrets |
-| `setup-wireshark.sh` applies capabilities | `deploy/scripts/tests/test_setup_wireshark.bats` | `getcap /usr/bin/dumpcap` check |
+| Test | Description | Acceptance Criteria |
+|------|-------------|---------------------|
+| `test-create-user.sh` | Run `create-user.sh` on a clean system | `id tianer` succeeds; user has correct groups |
+| `test-create-user-idempotent.sh` | Re-run `create-user.sh` | Success; no errors; group memberships unchanged |
+| `test-create-dirs.sh` | Run `create-dirs.sh` | All directories exist with correct permissions |
+| `test-tmpfiles.sh` | Run `systemd-tmpfiles --create` | FIFOs exist at expected paths |
+| `test-udev-rules-syntax.sh` | Validate `99-tianer.rules` syntax | `udevadm verify` passes |
+| `test-secrets-generate.sh` | Run `generate-secrets.sh` | Secret files exist with mode 0600 |
+| `test-secrets-idempotent.sh` | Re-run `generate-secrets.sh` | Files unchanged; no regeneration |
+| `test-dumpcap-capabilities.sh` | Run `setup-wireshark.sh` | `getcap /usr/bin/dumpcap` shows `cap_net_raw,cap_net_admin+eip` |
+| `test-podman-rootless.sh` | Install Podman; verify rootless | `podman run --rm docker.io/library/alpine:latest echo hello` succeeds as `tianer` |
+| `test-linger.sh` | Run `loginctl enable-linger tianer` | `loginctl show-user tianer -p Linger` returns `yes` |
+| `test-quadlet-syntax.sh` | Validate all `.container` files | `podman systemd generate` succeeds |
 
-### 10.2 Integration Tests (bash)
+### 10.2 Integration Tests
 
-| Test | File | Purpose |
-|------|------|---------|
-| Full prerequisite verification | `tests/integration/test_prereqs.sh` | Run `tianer-check-prereqs.sh` and verify exit 0 |
-| OS verification rejects wrong distro | `tests/integration/test_os_verify.sh` | Mock `/etc/os-release` with wrong values |
-| udev rules loaded correctly | `tests/integration/test_udev.sh` | `udevadm test` on a simulated device |
-| Podman rootless smoke test | `tests/integration/test_podman_rootless.sh` | `sudo -u tianer podman run --rm hello-world` |
-| systemd-linger active | `tests/integration/test_linger.sh` | `loginctl show-user tianer -p Linger` |
-| tmpfiles creates FIFOs | `tests/integration/test_tmpfiles.sh` | Verify FIFOs exist after `systemd-tmpfiles --create` |
-| Container with USB device access | `tests/integration/test_container_usb.sh` | `--device /dev/tianer/nrf0` passes through correctly |
+| Test | Description | Acceptance Criteria |
+|------|-------------|---------------------|
+| `test-full-bootstrap.sh` | Run `setup.sh` on a clean Raspberry Pi OS system | All phases complete; `tianer-check-prereqs.sh` returns 0 |
+| `test-bootstrap-idempotent.sh` | Re-run `setup.sh` | No errors; all checks pass; no duplicate operations |
+| `test-usb-device-access.sh` | Plug in an nRF52840 dongle | `/dev/tianer/nrf0` exists; `stat` shows correct permissions |
+| `test-container-start.sh` | Start all Quadlet containers with `systemctl --user` | All containers healthy; `pg_isready` returns accepting |
+| `test-fifo-persistence.sh` | Reboot; verify FIFOs after restart | All 4 FIFOs exist after boot |
 
 ### 10.3 Acceptance Criteria
 
-| # | Criterion | Verification Command | Pass Condition |
-|---|-----------|---------------------|----------------|
-| AC-C01-1 | `tianer` system user exists with no login shell | `getent passwd tianer \| awk -F: '{print $7}'` | Returns `/usr/sbin/nologin` |
-| AC-C01-2 | `tianer` is in `plugdev`, `dialout`, `wireshark` | `id -nG tianer` | Contains all three group names |
-| AC-C01-3 | All mandatory paths exist with correct ownership | `stat -c '%U %G %a' /var/lib/tianer /var/run/tianer /var/log/tianer /etc/tianer` | Each line is `tianer tianer 750` (except `/etc/tianer` which is `tianer tianer 700`) |
-| AC-C01-4 | udev rules installed | `test -f /etc/udev/rules.d/99-tianer.rules` | File exists |
-| AC-C01-5 | `dumpcap` has file capabilities | `getcap /usr/bin/dumpcap` | Output contains `cap_net_raw` and `cap_net_admin` |
-| AC-C01-6 | Podman installed | `which podman` | Returns a path |
-| AC-C01-7 | Rootless Podman works as `tianer` | `sudo -u tianer podman run --rm hello-world` | Exits 0 |
-| AC-C01-8 | `systemd-linger` enabled for `tianer` | `loginctl show-user tianer -p Linger` | Returns `Linger=yes` |
-| AC-C01-9 | FIFOs created at boot | `ls -la /var/run/tianer/*.fifo` | Shows 4 FIFO files |
-| AC-C01-10 | Secrets directory has correct permissions | `stat -c '%a' /etc/tianer/secrets` | Returns `700` |
-| AC-C01-11 | No `tianer` sudoers entry | `test -f /etc/sudoers.d/tianer` | File does not exist (exits 1) |
-| AC-C01-12 | Quadlet prerequisites directory exists | `test -d /etc/containers/systemd` | Directory exists |
-| AC-C01-13 | Container image pull works | `sudo -u tianer podman pull docker.io/library/hello-world:latest` | Exits 0 |
-
-### 10.4 End-to-End Test
-
-`tests/integration/test_prereqs.sh` — full acceptance validation (runs on the target Pi after `setup.sh`):
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-FAILURES=0
-
-check() {
-    local desc="$1"; shift
-    if "$@"; then
-        echo "PASS: $desc"
-    else
-        echo "FAIL: $desc"
-        FAILURES=$((FAILURES + 1))
-    fi
-}
-
-# User
-check "tianer user exists" id tianer >/dev/null
-check "tianer has no login shell" bash -c '[[ "$(getent passwd tianer | cut -d: -f7)" == "/usr/sbin/nologin" ]]'
-
-# Groups
-for grp in plugdev dialout wireshark; do
-    check "tianer in group $grp" id -nG tianer | grep -qw "$grp"
-done
-
-# Paths
-check "/var/lib/tianer exists with correct owner" bash -c '[[ "$(stat -c "%U:%G:%a" /var/lib/tianer)" == "tianer:tianer:750" ]]'
-check "/var/run/tianer exists" test -d /var/run/tianer
-check "/var/log/tianer exists" test -d /var/log/tianer
-check "/etc/tianer exists with correct perms" bash -c '[[ "$(stat -c "%U:%G:%a" /etc/tianer)" == "tianer:tianer:700" ]]'
-check "/etc/tianer/secrets perms" bash -c '[[ "$(stat -c "%a" /etc/tianer/secrets)" == "700" ]]'
-
-# udev
-check "udev rules installed" test -f /etc/udev/rules.d/99-tianer.rules
-
-# Capabilities
-check "dumpcap has capabilities" getcap /usr/bin/dumpcap | grep -q 'cap_net_raw'
-
-# Podman
-check "podman installed" which podman >/dev/null
-check "rootless podman works" sudo -u tianer podman run --rm hello-world >/dev/null 2>&1
-
-# Linger
-check "systemd-linger enabled" loginctl show-user tianer -p Linger | grep -q 'Linger=yes'
-
-# FIFOs (may not exist if no services started yet; tmpfiles can be triggered manually)
-check "FIFOs created by tmpfiles" bash -c '
-  systemd-tmpfiles --create /etc/tmpfiles.d/tianer.conf
-  for f in ut1 nrf1 nrf2 nrf3; do test -p "/var/run/tianer/${f}.fifo" || exit 1; done
-'
-
-# Secrets
-check "secrets generated" test -f /etc/tianer/secrets/db_password
-check "secrets permissions" bash -c '[[ "$(stat -c "%a" /etc/tianer/secrets/db_password)" == "600" ]]'
-
-# No sudoers
-check "no tianer sudoers" bash -c '! test -f /etc/sudoers.d/tianer'
-
-# Quadlet
-check "Quadlet directory exists" test -d /etc/containers/systemd
-
-# Subordinate IDs
-check "subuid has tianer" grep -q tianer /etc/subuid
-check "subgid has tianer" grep -q tianer /etc/subgid
-
-echo
-if [[ $FAILURES -eq 0 ]]; then
-    echo "PREREQUISITES OK ($FAILURES failures)"
-    exit 0
-else
-    echo "PREREQUISITES FAILED ($FAILURES failures)"
-    exit 1
-fi
-```
+1. **System user:** `tianer` user exists with UID < 1000, shell `/usr/sbin/nologin`, groups `plugdev,dialout,wireshark`.
+2. **File capabilities:** `dumpcap` has `cap_net_raw,cap_net_admin+eip`.
+3. **udev rules:** Devices appear at `/dev/tianer/<name>` with correct permissions.
+4. **tmpfiles:** FIFOs created at `/var/run/tianer/*.fifo` with mode 0660.
+5. **Podman rootless:** Containers run as `tianer`, not as root.
+6. **Linger:** `tianer` user's systemd --user instance starts at boot.
+7. **Secrets:** Password files exist with mode 0600.
+8. **Idempotent:** All bootstrap scripts safe to re-run.
+9. **Health check:** `tianer-check-prereqs.sh` returns 0 after bootstrap.
+10. **No sudo:** `tianer` user has no sudoers entry.
 
 ---
 
 ## 11. Deployment Notes
 
-### 11.1 `setup.sh` Phases
+### 11.1 Bootstrap Order
 
-`deploy/setup.sh` is the master orchestrator. It runs as `root` (via `sudo`) once at initial deployment and is **idempotent** — safe to re-run for remediation or upgrades.
+`deploy/setup.sh` orchestrates all C01 phases. Phases are executed in order; each phase is idempotent.
 
-| Phase | Step | Script/Command | Idempotent? |
-|-------|------|---------------|-------------|
-| 1 | Verify OS | `grep /etc/os-release` | Yes — read-only |
-| 2a | Install system packages | `apt-get install -y $(cat apt-packages.txt)` | Yes — apt-get install on already-installed packages is a no-op |
-| 2b | Add external apt repos | `apt-add-repository` + GPG key import | Yes — checks if repo already present |
-| 2c | Install repo-specific packages | `apt-get install -y postgresql-17 ...` | Yes |
-| 3 | Create tianer user + groups | `create-user.sh` | Yes — guarded by `id -u tianer` and `-aG` |
-| 4a | Create filesystem paths | `create-dirs.sh` | Yes — `install -d` is idempotent |
-| 4b | Apply tmpfiles.d | `systemd-tmpfiles --create` | Yes — `-p` type is idempotent |
-| 4c | Generate secrets | `generate-secrets.sh` | Yes — checks file existence first |
-| 5a | Setup Wireshark capabilities | `setup-wireshark.sh` | Yes — `dpkg-reconfigure` is idempotent |
-| 5b | Install udev rules | `install -m 0644 99-tianer.rules` + `udevadm control --reload` + `udevadm trigger` | Yes — overwrites existing rules file |
-| 6a | Install Podman | `apt-get install -y podman slirp4netns ...` | Yes |
-| 6b | Enable lingering | `loginctl enable-linger tianer` | Yes — `enable-linger` is idempotent |
-| 7 | Deploy Quadlet files | `install -m 0644` to `/etc/containers/systemd/` | Yes — overwrites existing |
-| 8 | Reload systemd | `systemctl daemon-reload` | Yes |
-| 9 | Apply DB migrations | `make db-up` | Yes — migration tracking table prevents re-application |
-| 10 | Print completion summary | echo with next-steps instructions | N/A |
+### 11.2 Manual Steps
 
-### 11.2 apt Package List
+Outside the scope of `setup.sh`, the following steps require human intervention:
+- SD card formatting and mounting
+- Raspberry Pi OS installation on eMMC
+- Physical USB hub and dongle connection
+- SSH key configuration for operator access
 
-`deploy/apt-packages.txt` — full list (see §4.3.1)
+### 11.3 Rollback
 
-### 11.3 Containerfile for Base Image
-
-C01 provides a **base container image** used as the foundation for other service images (C05, C07). It is a minimal Debian Trixie slim image with runtime dependencies pre-installed:
-
-**`deploy/containers/Containerfile.tianer-base`:**
-
-```dockerfile
-# Stage 1: Build stage (used only in multi-stage builds by C05/C07)
-FROM debian:trixie-slim AS builder
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    g++-14 \
-    cmake \
-    libpqxx-dev \
-    libpcap-dev \
-    nlohmann-json3-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Stage 2: Runtime stage (minimal — no compilers, no headers)
-FROM debian:trixie-slim AS runtime
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpqxx-7.8 \
-    libpcap0.8 \
-    libstdc++6 \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-```
-
-**Size target:** Under 80 MB (runtime stage only).
-
-**Policy:** No shells, no package managers, no development headers in the runtime stage. Each component's `Containerfile` inherits from this base using `FROM tianer-base:latest AS runtime` and copies its compiled binary.
-
-### 11.4 Quadlet Unit Deployment
-
-Quadlet files are deployed to `/etc/containers/systemd/` from `deploy/containers/`. The inventory (per storage-strategy.md):
-
-| File | Type | Purpose |
-|------|------|---------|
-| `tianer-net.network` | Network | Internal bridge network for platform pod |
-| `tianer-postgres-data.volume` | Volume | Persistent PostgreSQL data (V06) |
-| `tianer-grafana-data.volume` | Volume | Persistent Grafana data (V07) |
-| `tianer-capture.pod` | Pod | Container group for sniffer + tshark + ingest (Network=none) |
-| `tianer-platform.pod` | Pod | Container group for API, gap-detect, deep-parser, ML (bridge) |
-| `tianer-postgres.container` | Container | PostgreSQL 17 in standalone container |
-| `tianer-sniffer@.container` | Container (template) | Per-sniffer wrapper |
-| `tianer-tshark@.container` | Container (template) | Per-sniffer tshark |
-| `tianer-ingest@.container` | Container (template) | Per-sniffer ingest bridge |
-| `tianer-rotate.container` | Container | PCAP rotation |
-| `tianer-gap-detect.container` | Container | Gap detector |
-| `tianer-deep-parse.container` | Container | Deep parser (batch) |
-| `tianer-ml-classify.container` | Container | ML enrichment |
-| `tianer-api.container` | Container | FastAPI backend |
-| `tianer-grafana.container` | Container | Grafana |
-
-After deployment, containers are managed via `systemctl --user`:
-
-```bash
-# Enable auto-start at boot (as tianer user)
-sudo machinectl shell tianer@ /bin/bash -c '
-  systemctl --user enable tianer-postgres.service
-  systemctl --user enable tianer-grafana.service
-  systemctl --user enable tianer-capture-pod.service
-  systemctl --user enable tianer-platform-pod.service
-'
-
-# Start all
-sudo machinectl shell tianer@ /bin/bash -c 'systemctl --user start tianer.target'
-```
+C01 does not support automated rollback since it modifies the host OS. Manual rollback steps:
+1. Remove `tianer` user: `userdel -r tianer`
+2. Remove groups (if no longer needed): `groupdel wireshark`
+3. Remove udev rule: `rm /etc/udev/rules.d/99-tianer.rules && udevadm control --reload`
+4. Remove directories: `rm -rf /etc/tianer /var/lib/tianer /var/run/tianer /var/log/tianer /opt/tianer /usr/share/tianer`
+5. Remove tmpfiles config: `rm /etc/tmpfiles.d/tianer.conf`
+6. Uninstall packages (optional): review `apt-packages.txt` and remove unnecessary packages
 
 ---
 
-## 12. Container Integration
+## References
 
-### 12.1 Quadlet Unit Verification
+[1] Freedesktop.org. "systemd.exec(5) — Execution Environment Configuration." https://man7.org/linux/man-pages/man5/systemd.exec.5.html, systemd 261~rc1 — Documents `User=`, `Group=`, `NoNewPrivileges=`, `ReadWritePaths=`, `ProtectSystem=strict`, and all sandboxing directives referenced in §8.6.
 
-Each Quadlet `.container` file must be validated before deployment:
+[2] Freedesktop.org. "loginctl(1) — Control the systemd Login Manager." https://man7.org/linux/man-pages/man1/loginctl.1.html, systemd 261~rc1 — Documents `enable-linger` semantics: spawns a user manager at boot and persists after logout (§4.7.2, §5.3).
 
-```bash
-# Validate Quadlet syntax (dry-run generation)
-/usr/libexec/podman/quadlet --dryrun --user
+[3] Freedesktop.org. "tmpfiles.d(5) — Configuration for Creation, Deletion, and Cleaning of Files and Directories." https://man7.org/linux/man-pages/man5/tmpfiles.d.5.html, systemd 261~rc1 — Documents the `p` type for FIFO creation and `d` type for directory creation (§4.5.2).
 
-# Check generated systemd units
-ls ~/.config/systemd/user/tianer-*.service
-```
+[4] Linux man-pages. "capabilities(7) — Overview of Linux Capabilities." https://man7.org/linux/man-pages/man7/capabilities.7.html — Documents `CAP_NET_RAW` (permits RAW and PACKET sockets), `CAP_NET_ADMIN` (permits promiscuous mode), and file capability semantics (`eip` = effective, inheritable, permitted) referenced in §3.4, §4.6.1, §5.3.
 
-### 12.2 Volume Mount Correctness
+[5] Freedesktop.org. "udev(7) — Dynamic Device Management." https://man7.org/linux/man-pages/man7/udev.7.html, systemd 261~rc1 — Documents `SYMLINK+=` (append symlink), `GROUP=` (set device group), `MODE=` (set permissions) in udev rules referenced in §4.6.2.
 
-Verify that volumes declared in storage-strategy.md are correctly mounted in containers:
+[6] Podman Project. "podman-run(1) — Run a Command in a New Container." https://docs.podman.io/en/latest/markdown/podman-run.1.html — Documents rootless Podman, `--device` for host device passthrough, `--group-add keep-groups` for supplementary group access in rootless containers (§5.2, §5.3).
 
-| Container | Expected Mounts | Access Mode |
-|-----------|----------------|-------------|
-| `tianer-postgres` | `tianer-postgres-data.volume:/var/lib/postgresql/data` | :rw |
-| `tianer-sniffer@` | `/etc/tianer:/etc/tianer` (V01), `/var/lib/tianer/pcap:/var/lib/tianer/pcap` (V02), `/var/run/tianer:/var/run/tianer` (V03), `/var/log/tianer:/var/log/tianer` (V04) | V01:ro, V02:rw, V03:rw, V04:rw |
-| `tianer-tshark@` | V01:ro, V03:rw, V04:rw | (no V02 access) |
-| `tianer-ingest@` | V01:ro, V03:rw, V04:rw | (no V02 access) |
-| `tianer-rotate` | V01:ro, V02:rw, V04:rw | |
-| `tianer-gap-detect` | V01:ro, V02:ro, V04:rw | V02 read-only for backfill |
-| `tianer-deep-parse` | V01:ro, V02:ro, V05:rw, V04:rw | V02 read-only |
-| `tianer-ml-classify` | V01:ro, V05:ro, V04:rw | V05 read-only |
-| `tianer-api` | V01:ro, V04:rw | No data volumes — reads DB only |
-| `tianer-grafana` | `tianer-grafana-data.volume:/var/lib/grafana`, V01:ro, V04:rw | |
+[7] Raspberry Pi Ltd. "Raspberry Pi Computer Hardware — Frequency Management and Thermal Control." https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#frequency-management-and-thermal-control — Documents CM5 SoC thermal throttling threshold at 85°C junction temperature (§2.4).
 
-### 12.3 Pod Networking
-
-```
-┌─────────────────────────────────────────┐
-│           tianer-capture pod             │
-│           (Network=none)                 │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ │
-│  │ sniffer@ │→│ tshark@  │→│ ingest@  │ │
-│  │          │ │          │ │          │ │
-│  └──────────┘ └──────────┘ └────┬─────┘ │
-│                                  │       │
-└──────────────────────────────────┼───────┘
-                                   │ localhost:5432
-                                   ▼
-┌─────────────────────────────────────────┐
-│          tianer-platform pod             │
-│          (bridge: tianer-net)            │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ │
-│  │gap-detect│ │deep-parse│ │  api     │ │
-│  │          │ │          │ │          │ │
-│  └──────────┘ └──────────┘ └──────────┘ │
-└─────────────────────────────────────────┘
-         │                              │
-         │ localhost:5432               │ localhost:5432
-         ▼                              ▼
-┌─────────────────┐       ┌─────────────────┐
-│ tianer-postgres │       │ tianer-grafana  │
-│ (standalone)    │       │ (standalone)    │
-└─────────────────┘       └─────────────────┘
-```
-
-- **tianer-capture pod:** Network=none — sniffer containers talk only to USB and FIFOs. tshark reads from FIFOs. Ingest writes to PostgreSQL via shared `localhost` network (the ingest container connects to PostgreSQL on the host's loopback).
-- **tianer-platform pod:** Bridge network (`tianer-net`) — allows HTTP between API and Grafana if needed in future.
-- **PostgreSQL + Grafana:** Standalone containers on `localhost` for database connections.
-
-### 12.4 Container Boot Order
-
-```
-1. tianer-postgres.service        (standalone, must be ready first)
-2. tianer-capture-pod.service     (depends on postgres)
-     ├─ tianer-tshark@.service    (must start before sniffer)
-     ├─ tianer-ingest@.service    (must start before sniffer)
-     └─ tianer-sniffer@.service   (starts last in pod)
-3. tianer-platform-pod.service    (depends on postgres)
-     ├─ tianer-gap-detect.service
-     ├─ tianer-deep-parse.service (batched, not always running)
-     ├─ tianer-ml-classify.service
-     └─ tianer-api.service
-4. tianer-grafana.service         (depends on postgres)
-```
+[8] Shadow-utils project. "useradd(8) — Create a New User or Update Default New User Information." https://man7.org/linux/man-pages/man8/useradd.8.html, shadow-utils 4.19.0 — Documents `--system` (system account), `--home-dir` (login directory), `--shell` (login shell), and `--user-group` (§4.4, §8.4).
 
 ---
 
-## Appendix A: Storage Budget
-
-| Storage Item | Location | Space Allocation | Notes |
-|-------------|----------|-----------------|-------|
-| OS + system packages | eMMC (`/`) | ~4 GB | Raspberry Pi OS Lite base |
-| Container images | eMMC (`/var/lib/containers/`) | ~600 MB | 11 images, layer-deduplicated |
-| PostgreSQL data (V06) | eMMC (Podman volume) | 5 GB | TimescaleDB hypertable + chunks |
-| Grafana data (V07) | eMMC (Podman volume) | 1 GB | sqlite + dashboard cache |
-| PCAP files (V02) | SD card (`/var/lib/tianer/pcap/`) | 25 GB | 14-day retention, compressed |
-| JSONL output (V05) | SD card (`/var/lib/tianer/data/`) | 2 GB | Deep parser output, rotated |
-| Logs (V04) | eMMC (`/var/log/tianer/`) | 5 GB | Structured logs, 30-day retention |
-| **Total eMMC** | | ~16 GB | ~50% of 32 GB eMMC |
-| **Total SD card** | | ~27 GB | Depends on SD card size; 32 GB minimum |
-| **Free eMMC buffer** | | ~16 GB | Headroom for growth, temp files, package updates |
-
----
-
-## Appendix B: Container Image Policy
-
-Per storage-strategy.md and the container security recommendation:
-
-| Requirement | Implementation |
-|------------|---------------|
-| Base image | `debian:trixie-slim` for C++/system services; `python:3.13-slim` for Python services |
-| Multi-stage builds | Mandatory — build stage has compilers; runtime stage copies only artifacts |
-| No shells in runtime | Remove `/bin/sh` and `/bin/bash` from runtime stage (use `scratch` or `gcr.io/distroless` where feasible) |
-| No package managers | `apt`, `pip`, `npm` removed from runtime stage |
-| No dev headers | `*-dev` packages only in build stage |
-| Image size target | Under 200 MB uncompressed per image |
-| Boot time target | Under 3 seconds to container ready |
-| Digest pinning | `podman pull image@sha256:...` only; CI enforces no `:latest` tags |
-| CVE scanning | `podman image inspect` + periodic `trivy` scan in CI |
-
----
-
-## Appendix C: Cross-Reference to Other Components
-
-| Component | Depends on C01 for... | C01 Section |
-|-----------|----------------------|-------------|
-| C02 (Database) | User `tianer`, PostgreSQL installed, secrets generated, config env file | §3, §4.4, §4.5.3, §9.1 |
-| C03 (Capture Pipeline) | udev device symlinks, FIFOs, Wireshark capabilities, sniffer config | §4.5.2, §4.6, §9.2 |
-| C05 (Ingest Bridge) | FIFO paths, DB credentials env file, libpqxx installed | §5.1, §9.1 |
-| C06 (Gap Detector) | PCAP directory, heartbeat directory, DB credentials | §5.1 |
-| C09 (REST API) | Secrets (API key, DB password), TLS certs directory | §5.1, §4.5.3 |
-| C12 (Service Orchestration) | Quadlet directory, Podman runtime, user linger, all systemd units | §4.7, §4.8, §11.4 |
-| C13 (Observability) | Host-level metrics paths, log directory | §7, §5.1 |
-| C14 (Deployment Automation) | Entire `setup.sh` phase sequence | §11.1 |
-
----
-
-## Appendix D: Glossary
-
-| Term | Definition |
-|------|-----------|
-| **Rootless Podman** | Podman running as an unprivileged user (`tianer`), using user namespaces — no `root` involved |
-| **Quadlet** | systemd generator that converts `.container` files into `systemd --user` service units |
-| **systemd-linger** | Mechanism allowing a user's `systemd --user` instance to start at boot and persist across login sessions (`loginctl enable-linger`) |
-| **tmpfiles.d** | systemd mechanism for creating/cleaning files, directories, and FIFOs at boot (`/etc/tmpfiles.d/`) |
-| **tmpfs** | RAM-backed filesystem — used for `/var/run/tianer/` (V03) so FIFOs are in-memory and recreated fresh at each boot |
-| **udev** | Linux device manager that creates device nodes, applies permissions, and creates symlinks when hardware is connected |
-| **file capability** | Linux kernel feature granting specific privileges to a binary without `setuid root` (e.g., `cap_net_raw+eip` on `/usr/bin/dumpcap`) |
-| **D-03, D-04, D-07** | Decision IDs from Phase A — see `docs/adr/0001-phase-a-decisions.md` |
-| **PF-4, PF-5, PF-8, PF-10** | Engineering-for-Failure principle IDs — see component-breakdown.md §6.1 |
+*End of C01 Platform Infrastructure Design Document.*

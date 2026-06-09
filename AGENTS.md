@@ -71,6 +71,43 @@ Examples:
 
 If a source is unreachable, state that explicitly and ask the user rather than guessing from memory.
 
+### Mandatory Citations in Design Documents
+
+**Every design document (`doc/designs/c*.md`) MUST include academic-style references to authoritative sources.** No design document may rely solely on agent training data or internal project documents. This is non-negotiable.
+
+**Reference quality requirements:**
+
+| Quality Tier | Source Type | Examples |
+|-------------|-------------|----------|
+| **Tier 1 (Required)** | Official specifications, standards bodies, peer-reviewed papers | IETF RFCs, IEEE standards, OWASP, NIST, Bluetooth Core Specification, W3C/WCAG, PostgreSQL official docs, systemd manual |
+| **Tier 2 (Strongly recommended)** | Authoritative vendor documentation, widely-adopted architecture references | Docker/Podman docs, TimescaleDB docs, FastAPI docs, Vue.js docs, Google SRE book, Martin Fowler's patterns |
+| **Tier 3 (Supporting)** | Industry best-practice guides, engineering blogs from major companies | Netflix Tech Blog, Uber Engineering, Cloudflare Blog, GitHub Engineering, AWS Architecture Blog |
+
+**What requires a citation:**
+
+- Any architectural pattern claim (e.g., "event-driven architecture," "CQRS," "hexagonal architecture")
+- Any protocol or standard reference (e.g., "BLE advertising uses channels 37/38/39")
+- Any security practice (e.g., "OWASP recommends parameterized queries")
+- Any performance claim (e.g., "PostgreSQL handles 10K writes/second")
+- Any hardware specification (e.g., "Raspberry Pi CM5 throttles at 85°C")
+- Any version pin justification (e.g., "we use PG 17 because Debian Trixie ships it")
+
+**Citation format (academic style):**
+
+Each design document MUST have a `## References` section at the end. Citations in the body text use bracketed numbers: `[1]`, `[2]`, etc.
+
+Example:
+```
+## References
+
+[1] IETF. "RFC 9110 — HTTP Semantics." https://www.rfc-editor.org/rfc/rfc9110, June 2022.
+[2] OWASP Foundation. "OWASP Top 10 — 2021." https://owasp.org/Top10/, 2021.
+[3] PostgreSQL Global Development Group. "PostgreSQL 17 Documentation." https://www.postgresql.org/docs/17/, 2024.
+[4] Bluetooth SIG. "Bluetooth Core Specification v5.4, Vol 6, Part B — Link Layer Specification." https://www.bluetooth.com/specifications/specs/core-specification-5-4/, 2023.
+```
+
+**Agent responsibility:** Every claim a design document makes that is not purely internal project logic (e.g., "we chose component X because it satisfies our requirement Y") MUST be traceable to at least one reference in the References section. If an agent makes a factual claim from training data and cannot find an authoritative source, the claim MUST be prefixed with `[NEEDS CITATION]` and flagged for the Docs Writer to verify during Phase C.
+
 ### Context7 — Library Documentation Lookup
 
 When agents need library or API documentation, they SHOULD use [Context7](https://github.com/upstash/context7) to fetch up-to-date, version-specific docs directly into the prompt. This prevents hallucinated APIs, outdated code examples, and generic answers based on stale training data.
@@ -91,8 +128,6 @@ npx ctx7 setup
 | MCP | `query-docs` | Retrieve documentation by library ID (e.g. `/vercel/next.js`) |
 
 **Rule for all agents:** Always use Context7 when needing library/API documentation, code generation, setup, or configuration steps — without the user having to explicitly ask. If Context7 is not available, fall back to fetching the library's official documentation URL directly.
-
----
 
 ### Cross-Document Consistency Rule
 
@@ -185,6 +220,7 @@ After every change, before considering the task complete, the agent MUST run thi
 - [ ] **README.md** — Did I create, delete, or rename a file? Update the Review & Test Status tables.
 - [ ] **Agent `permission:` block** — Did I create or change an agent? Validate `edit`/`bash` against the Permission Validation Rule. This is not optional — dispatch-only agents with `edit: allow` are a structural defect.
 - [ ] **Cross-document consistency** — Did I change a concept, name, path, or version that appears in another document? Search all docs and update them. If I found a stale reference I couldn't fix, that's a bug — flag it rather than adding a staleness banner.
+- [ ] **Design document references** — Did I add or update a design document? Verify it has a References section with at least 3 Tier 1 citations relevant to the document's domain.
 
 If a checklist item doesn't apply, mark it `N/A`. If you skip an item without justification, the change is incomplete.
 
@@ -327,6 +363,7 @@ All design documents are in `doc/designs/`. See `doc/designs/component-breakdown
 | test-driven-development | Generic TDD loop |
 | type-design-review | Type system and API review |
 | verification-before-completion | Final verification before marking done |
+| github | GitHub operations — conventional commits, SSH authentication with agent socket, safe push, commit grouping rules |
 
 ### Domain Skills (Project-Specific)
 
