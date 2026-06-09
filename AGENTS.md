@@ -94,6 +94,20 @@ npx ctx7 setup
 
 ---
 
+### Cross-Document Consistency Rule
+
+**When any document is updated, all affected documents must be re-visited for consistency.** No document may carry a "staleness banner" or disclaimer pointing readers to "newer" documents. If a document is out of date, it must be updated — not flagged as stale. A stale document is a defect, not a feature.
+
+This means:
+- After any design decision is resolved, all documents referencing that decision must be updated immediately.
+- After any code change, affected design documents, runbooks, and README must be checked for consistency.
+- No document may describe a state that contradicts another document. Contradiction = bug.
+- The definitive source of truth is the latest commit on `main`. Every document in that commit must be internally and mutually consistent.
+
+**Enforcement:** The Documentation-Update Rule (below) already requires agents to update affected documentation after every change. This rule adds the cross-document consistency check: after updating one document, the agent must also check all other documents that reference the same concept and bring them into alignment.
+
+---
+
 ## Commit Rules
 
 ### Conventional Commits v1.0.0 (Mandatory)
@@ -170,6 +184,7 @@ After every change, before considering the task complete, the agent MUST run thi
 - [ ] **.opencode/skills/pipeline-passport/SKILL.md** — Did I add or remove a pipeline step? Update the Required Steps template.
 - [ ] **README.md** — Did I create, delete, or rename a file? Update the Review & Test Status tables.
 - [ ] **Agent `permission:` block** — Did I create or change an agent? Validate `edit`/`bash` against the Permission Validation Rule. This is not optional — dispatch-only agents with `edit: allow` are a structural defect.
+- [ ] **Cross-document consistency** — Did I change a concept, name, path, or version that appears in another document? Search all docs and update them. If I found a stale reference I couldn't fix, that's a bug — flag it rather than adding a staleness banner.
 
 If a checklist item doesn't apply, mark it `N/A`. If you skip an item without justification, the change is incomplete.
 
@@ -278,6 +293,7 @@ All design documents are in `doc/designs/`. See `doc/designs/component-breakdown
 | `c12-service-orchestration.md` | systemd units, dependency chain, Makefile |
 | `c13-observability.md` | Metrics catalogue, structured logging, alerts |
 | `c14-deployment-automation.md` | setup.sh, build targets, install paths, rollback |
+| `storage-strategy.md` | Container persistent storage: volume inventory, access matrix, container image policy |
 
 ---
 
@@ -289,9 +305,12 @@ All design documents are in `doc/designs/`. See `doc/designs/component-breakdown
 |-------|---------|
 | assumption-trap | Halt on ambiguity — never guess |
 | brainstorming | Phase A creative exploration |
+| clarification-table | Batch blocked questions into interactive HTML table for user to answer |
 | compliance-gate | Tiered gate system (T1/T2/T3/T-ARCH) |
 | context7-docs | Fetch up-to-date library/API docs |
+| cross-document-consistency | Grep-based cross-document checks (DC-1 through DC-4) |
 | datasheet-verification | Verify claims against source documents |
+| doxygen-cpp | Doxygen documentation standard for C/C++ projects |
 | flag-protocol | Structured request format for non-PM agents |
 | grill-me | Adversarial design review |
 | incremental-execution | Unit-by-unit implementation |
