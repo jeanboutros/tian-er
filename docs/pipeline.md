@@ -14,19 +14,34 @@ The Supreme Leader is the orchestrator — it dispatches work, enforces protocol
 
 **Goal:** Define and validate "What" and "How" before writing a single line of code.
 
+### Task Domain Classification
+
+Before dispatching Phase A, the task scope is classified to determine the specialist roster. The specialist count is **not fixed** — it depends on what the task touches.
+
+| Domain Signal | Required Specialist |
+|---------------|-------------------|
+| Always | SW Engineer, Test Engineer, Docs Writer |
+| Hardware, registers, GPIO, timers, peripherals | Hardware Engineer |
+| Wireless, RF, BLE, radio protocols | Wireless Expert |
+| Auth, secrets, crypto, network, input parsing | Security Reviewer |
+| UI, frontend, dashboard, screens, UX | Product Designer + UX Engineer |
+| Frontend code (HTML/CSS/JS/TSX/React/Vue) | UI Engineer (Phase B) |
+
 ### Sub-steps
 
 | Step | Name | Description | Who |
 |------|------|-------------|-----|
-| A0 | Task Definition | Produce detailed task specification: acceptance criteria, files, constraints, test strategy, doc plan | All agents collaborate |
-| A1 | Parallel Specialist Review | All 6 specialists review the proposal independently | SW Engineer, HW Engineer, Wireless Expert, Security Reviewer, Test Engineer, Docs Writer |
+| A0 | Task Definition | Produce detailed task specification: acceptance criteria, files, constraints, test strategy, doc plan. **Classify task domain** to determine specialist roster. | All agents collaborate |
+| A1 | Parallel Specialist Review | All applicable specialists review the proposal independently | Specialist roster per Task Domain Classification |
 | A2 | Dual-Model Challenge | Two model passes review architecture: primary produces, challenger critiques | Supreme Leader orchestrates |
-| A3 | A-GATE | T3 + T-ARCH compliance check | All 6 specialists (T3), SW Engineer (T-ARCH) |
+| A2a | ADR Creation | Every resolved design decision from A2 MUST have an ADR file created at `docs/adr/<adr-id>.md`. Use `node docs/project-management/next-id.mjs adr` to get the next ADR sequence number. | SW Engineer (writes), Docs Writer (reviews) |
+| A3 | A-GATE | T3 + T-ARCH compliance check | All dispatched specialists (T3), SW Engineer (T-ARCH) |
 
 ### A-GATE Pass Criteria
 
-- All 6 specialists issue **APPROVED** or **CONDITIONAL PASS**
+- All dispatched specialists issue **APPROVED** or **CONDITIONAL PASS**
 - T-ARCH passes
+- Every resolved design decision has an ADR file
 - On fail: loop back to A1 with specific critique (max 3 loops per tier)
 
 ---
@@ -47,21 +62,21 @@ The Supreme Leader is the orchestrator — it dispatches work, enforces protocol
 
 ### B-UNIT-GATE Pass Criteria
 
-- All 9 T1 checks pass + T-ARCH passes
-- On fail: fix and retry (max 3x per tier)
+- All 8 T1 checks pass + T-ARCH passes
+- On fail: fix and retry (max 3× per tier)
 
 ### B-FINAL-GATE Pass Criteria
 
 - T1 passes + T2 passes + T-ARCH passes
-- On fail: route to appropriate fixer (max 3x per tier)
+- On fail: route to appropriate fixer (max 3× per tier)
 
 ### The PAU Loop
 
-Each unit follows **Plan -> Apply -> Validate**:
+Each unit follows **Plan → Apply → Validate**:
 
-1. **Plan** -- identify the unit, declare what changes are needed, list acceptance criteria
-2. **Apply** -- implement the changes, run build verification
-3. **Validate** -- run T1 checks, verify acceptance criteria, move to next unit or gate
+1. **Plan** — identify the unit, declare what changes are needed, list acceptance criteria
+2. **Apply** — implement the changes, run build verification
+3. **Validate** — run T1 checks, verify acceptance criteria, move to next unit or gate
 
 ---
 
@@ -75,12 +90,12 @@ Each unit follows **Plan -> Apply -> Validate**:
 |------|------|-------------|-----|
 | C0 | T1 Re-run | Mechanical compliance re-check on final codebase | Code Architect |
 | C1 | Dual-Model Challenge (Verification) | Primary verifier + challenger verifier | Supreme Leader orchestrates |
-| C2 | Parallel Specialist Approval | All 6 specialists review independently | All 6 specialists |
-| C3 | C-GATE | T1 re-run + T3 + T-ARCH | Code Architect (T1), Specialists (T3), SW Engineer (T-ARCH) |
+| C2 | Parallel Specialist Approval | All dispatched specialists review independently | All dispatched specialists |
+| C3 | C-GATE | T1 re-run + T3 + T-ARCH | Code Architect (T1), Dispatched specialists (T3), SW Engineer (T-ARCH) |
 
 ### C-GATE Pass Criteria
 
-- T1 passes + all 6 APPROVED + T-ARCH passes
+- T1 passes + all dispatched specialists APPROVED + T-ARCH passes
 
 ---
 
@@ -88,21 +103,20 @@ Each unit follows **Plan -> Apply -> Validate**:
 
 Every gate checks one or more compliance tiers. Each tier has an **independent retry budget of 3**.
 
-### T1 -- Mechanical (Automated)
+### T1 — Mechanical (Automated)
 
 | # | Check | Criterion |
 |---|-------|-----------|
 | 1 | Build passes | Project build command exits 0 |
 | 2 | No compiler warnings | `-Werror` is active; any warning is a failure |
-| 3 | Doxygen on all public API | Every public function/class/struct has `/** ... */` Doxygen |
+| 3 | Doc-standard on all public API | Every public function/class/struct has a doc comment per the language-specific standard (e.g. `/** ... */` for Doxygen, JSDoc for JS) |
 | 4 | No decision references in code | No `D-1:`, no "replaces the former..." |
 | 5 | No raw integers in public API | Finite-value fields use `enum class`, not `uint8_t` |
 | 6 | Reserved bits written as 0 | Register writes clear reserved bits |
 | 7 | File placement | Library code in `components/`, app code in `main/` |
 | 8 | Platform independence | Library headers include only `<cstdint>`, `<cstring>`, and own headers |
-| 9 | No hardcoded secrets | No passwords, API keys, tokens in source files |
 
-### T2 -- Architectural (Software Engineer)
+### T2 — Architectural (Software Engineer)
 
 | # | Check | Criterion |
 |---|-------|-----------|
@@ -112,17 +126,17 @@ Every gate checks one or more compliance tiers. Each tier has an **independent r
 | 4 | No mutable globals | Stateful singletons forbidden |
 | 5 | Build dependencies | Component dependencies correct and minimal |
 
-### T3 -- Semantic (All 6 Specialists)
+### T3 — Semantic (All Dispatched Specialists)
 
-All 6 specialist agents must issue APPROVED or CONDITIONAL PASS:
-- Software Engineer -- architecture, API surface, SOLID
-- Hardware Engineer -- datasheet fidelity, register correctness, timing
-- Wireless Expert -- protocol compliance, channel mapping, modulation
-- Security Reviewer -- attack surfaces, buffer safety, secrets handling
-- Test Engineer -- test coverage, edge cases, static assertions
-- Docs Writer -- documentation completeness, reference accuracy
+All dispatched specialists (per the task-driven roster) must issue APPROVED or CONDITIONAL PASS:
+- Software Engineer — architecture, API surface, SOLID
+- Hardware Engineer — datasheet fidelity, register correctness, timing (if in scope)
+- Wireless Expert — protocol compliance, channel mapping, modulation (if in scope)
+- Security Reviewer — attack surfaces, buffer safety, secrets handling (if in scope)
+- Test Engineer — test coverage, edge cases, static assertions
+- Docs Writer — documentation completeness, reference accuracy, cross-document consistency
 
-### T-ARCH -- Structural & Principles
+### T-ARCH — Structural & Principles
 
 | # | Check | Criterion |
 |---|-------|-----------|
@@ -137,75 +151,75 @@ All 6 specialist agents must issue APPROVED or CONDITIONAL PASS:
 
 ```
                                     ┌───────────────────────────────────────────────┐
-                                    |                                               |
-                                    v                                               |
-┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐|
-│  A0:Task │───>│A1:Review│───>│A2:Dual │───>│A3:A-GATE│───>│ B1:PLAN │───>│B2:APPLY │|
-│  Def     │    │Parallel │    │Challenge│   │T3+T-ARCH│    │         │    │ (unit)  │|
-└─────────┘    └─────────┘    └─────────┘    └────┬────┘    └─────────┘    └────┬────┘|
-                                                     │                              │     │
-                                                     │ FAIL (3x T3 or T-ARCH)        │     │
-                                                     │ ┌───────────────────────────┘  │     │
-                                                     │ │  PASS                         │     │
-                                                     v v                              v     │
-                                               ┌──────────┐                    ┌──────────┐ │
-                                               │A1:Review │<──── 3xT3 ────   │B2a:UNIT  │ │
-                                               │(loop back│                   │GATE      │ │
-                                               │ with cri-│                   │T1+T-ARCH │ │
-                                               │ tique)    │                   └────┬─────┘ │
-                                               └──────────┘                        │       │
-                                                                                   │       │
+                                    │                                               │
+                                    ▼                                               │
+┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐│
+│  A0:Task │───▶│A1:Review│───▶│A2:Dual │───▶│A2a:ADRs │───▶│A3:A-GATE│───▶│ B1:PLAN │───▶│B2:APPLY ││
+│  Def     │    │Parallel │    │Challenge│    │Create   │    │T3+T-ARCH│    │         │    │ (unit)  ││
+└─────────┘    └─────────┘    └─────────┘    └─────────┘    └────┬────┘    └─────────┘    └────┬────┘│
+                                                                  │                              │     │
+                                                                  │ FAIL (3× T3 or T-ARCH)        │     │
+                                                                  │ ┌───────────────────────────┘  │     │
+                                                                  │ │  PASS                         │     │
+                                                                  ▼ ▼                              ▼     │
+                                                            ┌──────────┐                    ┌──────────┐ │
+                                                            │A1:Review │◀──── 3×T3 ────   │B2a:UNIT  │ │
+                                                            │(loop back│                   │GATE      │ │
+                                                            │ with cri-│                   │T1+T-ARCH │ │
+                                                            │ tique)    │                   └────┬─────┘ │
+                                                            └──────────┘                        │       │
+                                                                                       │
                                                          PASS ────────────────────┘       │
                                                                                            │
-                                                                                   ┌───────v──────┐
+                                                                                   ┌───────▼──────┐
                                                                                    │More units?   │
                                                                                    └──┬────────┬─┘
                                                                                       │YES     │NO
                                                                                       │        │
-                                                                                      │        v
+                                                                                      │        ▼
                                                                                       │  ┌──────────┐
                                                                                       │  │B3a:FINAL │
                                                                                       │  │GATE      │
                                                                                       │  │T1+T2+ARCH│
                                                                                       │  └────┬─────┘
                                                                                       │       │
-                                                                                      │  FAIL (3x any tier)
+                                                                                      │  FAIL (3× any tier)
                                                                                       │  ┌─────│─────┐
                                                                                       │  │ LOOP BACK │
                                                                                       │  └─────│─────┘
                                                                                       │       │ PASS
-                                                                                      │       v
+                                                                                      │       ▼
                                                                                       │  ┌──────────┐
                                                                                       │  │C0:T1 re-  │
                                                                                       │  │run        │
                                                                                       │  └────┬─────┘
                                                                                       │       │
-                                                                                      │       v
+                                                                                      │       ▼
                                                                                       │  ┌──────────┐
                                                                                       │  │C1:Dual   │
                                                                                       │  │Challenge │
                                                                                       │  │(Verify)  │
                                                                                       │  └────┬─────┘
                                                                                       │       │
-                                                                                      │       v
+                                                                                      │       ▼
                                                                                       │  ┌──────────┐
                                                                                       │  │C2:Special-│
                                                                                       │  │ist Appro-│
                                                                                       │  │val (T3)  │
                                                                                       │  └────┬─────┘
                                                                                       │       │
-                                                                                      │       v
+                                                                                      │       ▼
                                                                                       │  ┌──────────┐
                                                                                       │  │C3:C-GATE │
                                                                                       │  │T1+T3+ARCH│
                                                                                       │  └────┬─────┘
                                                                                       │       │
-                                                                                      │  FAIL (3x any tier)
+                                                                                      │  FAIL (3× any tier)
                                                                                       │  ┌─────│─────┐
                                                                                       │  │ LOOP BACK│
                                                                                       │  └─────│─────┘
                                                                                       │       │ PASS
-                                                                                      │       v
+                                                                                      │       ▼
                                                                                       │  ┌──────────┐
                                                                                       │  │ COMMIT   │
                                                                                       │  └──────────┘
@@ -215,24 +229,25 @@ All 6 specialist agents must issue APPROVED or CONDITIONAL PASS:
 
 | From | Event | To | Condition |
 |------|-------|----|-----------|
-| A0 | Task defined | A1 | All agents have task spec |
-| A1 | Reviews complete | A2 | All 6 specialists reviewed |
-| A2 | Challenge complete | A3 | Synthesis produced |
-| A3 | A-GATE passes | B1 | All APPROVED/CONDITIONAL PASS + T-ARCH passes |
-| A3 | A-GATE fails | A1 | REJECTED or T-ARCH fail; loop back (max 3x) |
+| A0 | Task defined | A1 | Task domain classified, specialist roster determined |
+| A1 | Reviews complete | A2 | All dispatched specialists reviewed |
+| A2 | Challenge complete | A2a | Synthesis produced, decisions identified |
+| A2a | ADRs created | A3 | ADR file exists for every resolved decision |
+| A3 | A-GATE passes | B1 | All dispatched specialists APPROVED/CONDITIONAL PASS + T-ARCH passes + ADRs present |
+| A3 | A-GATE fails | A1 | REJECTED or T-ARCH fail; loop back (max 3×) |
 | B1 | Plan complete | B2 | Logical units identified |
 | B2 | Unit implemented | B2a | Build passes locally |
 | B2a | B-UNIT-GATE passes | B2 (next unit) | T1 + T-ARCH pass |
-| B2a | B-UNIT-GATE fails | B2 (fix) | T1 or T-ARCH fail; retry (max 3x per tier) |
+| B2a | B-UNIT-GATE fails | B2 (fix) | T1 or T-ARCH fail; retry (max 3× per tier) |
 | B2 | All units done | B3a | All units pass B-UNIT-GATE |
 | B3a | B-FINAL-GATE passes | C0 | T1 + T2 + T-ARCH pass |
-| B3a | B-FINAL-GATE fails | B2 (fix) | Any tier fails (max 3x per tier) |
+| B3a | B-FINAL-GATE fails | B2 (fix) | Any tier fails (max 3× per tier) |
 | C0 | T1 re-run passes | C1 | All T1 checks pass |
-| C0 | T1 re-run fails | B2 (fix) | Code Architect fixes (max 3x) |
+| C0 | T1 re-run fails | B2 (fix) | Code Architect fixes (max 3×) |
 | C1 | Challenge complete | C2 | Synthesis produced |
-| C2 | Reviews complete | C3 | All 6 specialists reviewed |
-| C3 | C-GATE passes | COMMIT | All APPROVED + T1 pass + T-ARCH pass |
-| C3 | C-GATE fails | C0 or C2 or B2 | T1 fail -> C0 (Code Architect fixes, re-run T1); T3 fail -> C2 (specialist re-review); T-ARCH fail -> Software Engineer (architectural fix) |
+| C2 | Reviews complete | C3 | All dispatched specialists reviewed |
+| C3 | C-GATE passes | COMMIT | All dispatched APPROVED + T1 pass + T-ARCH pass |
+| C3 | C-GATE fails | C0 or C2 or B2 | T1 fail → C0 (Code Architect fixes, re-run T1); T3 fail → C2 (specialist re-review); T-ARCH fail → Software Engineer (architectural fix) |
 | Any | 3 retries exhausted at any tier | ESCALATE | Supreme Leader presents violation report to user |
 
 ---
@@ -297,13 +312,16 @@ OWASP_expansion: "<none | list of added compliance categories>"
 | Implementation | Code Architect | pau-loop, incremental-execution, compliance-gate |
 | T1 compliance check | Code Architect | compliance-gate, verification-before-completion |
 | T2 architectural review | Software Engineer | compliance-gate, type-design-review |
-| T3 semantic review | All 6 specialists | compliance-gate, domain-specific skills |
+| T3 semantic review | All dispatched specialists | compliance-gate, domain-specific skills |
 | T-ARCH review | Software Engineer | compliance-gate, type-design-review |
 | Memory safety review | Memory Safety | assumption-trap, memory-safety |
 | Gate orchestration | Supreme Leader | pipeline, compliance-gate, flag-protocol |
 | Dispatch/routing | Supreme Leader | pipeline, flag-protocol |
 | Task creation | PM | pipeline, flag-protocol |
 | Debugging | Code Architect | systematic-debugging, domain |
+| Product vision / requirements discovery | Product Designer | assumption-trap, design-taste, ux-patterns |
+| Interaction design / UX review | UX Engineer | assumption-trap, ux-patterns, design-taste |
+| UI implementation | UI Engineer | pau-loop, incremental-execution, design-taste, ux-patterns |
 
 ---
 
@@ -313,18 +331,18 @@ Used in **Phase A** (architecture) and **Phase C** (verification).
 
 ### How It Works
 
-1. **Primary pass** -- First model produces the output (architecture proposal or verification).
-2. **Challenger pass** -- Second model independently reviews, looking for:
+1. **Primary pass** — First model produces the output (architecture proposal or verification).
+2. **Challenger pass** — Second model independently reviews, looking for:
    - Contradictions with datasheet/spec
    - Missed edge cases
    - Unsupported assumptions
    - Security gaps
    - Protocol non-compliance
    - T-ARCH violations (logical errors, structural issues, principle misalignment)
-3. **Synthesis** -- Supreme Leader merges findings:
-   - Agreements -> accepted
-   - Contradictions -> presented to user for decision
-   - One-sided findings -> accepted if well-evidenced, otherwise flagged
+3. **Synthesis** — Supreme Leader merges findings:
+   - Agreements → accepted
+   - Contradictions → presented to user for decision
+   - One-sided findings → accepted if well-evidenced, otherwise flagged
 
 ### When to Invoke
 
@@ -346,10 +364,10 @@ Used in **Phase A** (architecture) and **Phase C** (verification).
 
 When a task is dispatched, skills must be loaded in this order:
 
-1. `assumption-trap` -- FIRST, always
-2. `compliance-gate` -- tiered checks, OWASP expansion
-3. `pipeline` -- this skill, state machine
-4. `pau-loop` -- for Phase B work
+1. `assumption-trap` — FIRST, always
+2. `compliance-gate` — tiered checks, OWASP expansion
+3. `pipeline` — this skill, state machine
+4. `pau-loop` — for Phase B work
 5. Domain-specific skills as needed
 
 ### Skill Categories
@@ -369,10 +387,10 @@ Passports are stored in `docs/project-management/passports/<ticket-id>-passport.
 
 Key passport rules:
 
-1. **No step without a stamp** -- every step must be checked off before the next step begins
-2. **No skip without justification** -- a written justification and Supreme Leader authorisation are required
-3. **Loops are tracked** -- every A->B->A loop is recorded in the passport's Loop History section
-4. **Passport travels with dispatch** -- the passport file path is included in every dispatch envelope
+1. **No step without a stamp** — every step must be checked off before the next step begins
+2. **No skip without justification** — a written justification and Supreme Leader authorisation are required
+3. **Loops are tracked** — every A→B→A loop is recorded in the passport's Loop History section
+4. **Passport travels with dispatch** — the passport file path is included in every dispatch envelope
 
 ---
 
@@ -386,12 +404,12 @@ Before the Supreme Leader classifies intent or routes to any agent, it MUST exec
 
 | Gate Step | Check | Failure Action |
 |-----------|-------|----------------|
-| **PM Gate** | If new task: passport must be created by PM before any routing. Supreme Leader dispatches to PM with `trigger: "create-passport"` and waits. | BLOCKED -- no routing until passport exists. |
-| **Passport Exists** | Passport file at `docs/project-management/passports/<ticket-id>-passport.md` exists on disk. | BLOCKED -- dispatch to PM for passport creation. |
-| **Prior Steps Stamped** | All steps before target step have timestamps and results in Step Log. | BLOCKED -- route to missing step's agent. |
-| **Gate Results Recorded** | If at a gate, Gate Results table has current attempt entries. | BLOCKED -- run gate first. |
-| **Skips Justified** | Any unchecked Required Step has corresponding Skipped Steps entry with authorisation. | BLOCKED -- require authorisation. |
-| **Correction Records** | If retry_count > 0 for any tier, Correction Record exists in passport. | BLOCKED -- dispatch to producing agent for post-rejection-correction. |
+| **PM Gate** | If new task: passport must be created by PM before any routing. Supreme Leader dispatches to PM with `trigger: "create-passport"` and waits. | BLOCKED — no routing until passport exists. |
+| **Passport Exists** | Passport file at `docs/project-management/passports/<ticket-id>-passport.md` exists on disk. | BLOCKED — dispatch to PM for passport creation. |
+| **Prior Steps Stamped** | All steps before target step have timestamps and results in Step Log. | BLOCKED — route to missing step's agent. |
+| **Gate Results Recorded** | If at a gate, Gate Results table has current attempt entries. | BLOCKED — run gate first. |
+| **Skips Justified** | Any unchecked Required Step has corresponding Skipped Steps entry with authorisation. | BLOCKED — require authorisation. |
+| **Correction Records** | If retry_count > 0 for any tier, Correction Record exists in passport. | BLOCKED — dispatch to producing agent for post-rejection-correction. |
 
 ### Role Separation Rules
 
@@ -399,8 +417,8 @@ Before the Supreme Leader classifies intent or routes to any agent, it MUST exec
 |------|-------------|
 | Only PM creates passports | Supreme Leader MUST NOT create passport files. If none exists, dispatch to PM and wait. |
 | Only PM creates tickets | Supreme Leader MUST NOT create task entries in TODO.md or ticket files. |
-| Supreme Leader is dispatch-only | Supreme Leader MUST NOT perform specialist work. If a specialist fails, report to user -- do not fill in. |
-| No combined PM + Supreme Leader | These roles operate at different steps. The envelope must go PM -> Supreme Leader, never both at once. |
+| Supreme Leader is dispatch-only | Supreme Leader MUST NOT perform specialist work. If a specialist fails, report to user — do not fill in. |
+| No combined PM + Supreme Leader | These roles operate at different steps. The envelope must go PM → Supreme Leader, never both at once. |
 
 ### Status Protocol
 
@@ -420,8 +438,24 @@ The Supreme Leader must return this to the user immediately. Do NOT proceed to r
 
 After any pipeline violation or gate failure, the responsible agent MUST ask:
 
-1. **Why was this not caught earlier?** -- What review, test, or protocol gap allowed it through?
-2. **What procedural safeguard would have caught it?** -- What specific check, test, or verification step would have prevented it?
-3. **Update the knowledge base** -- Add the lesson to the relevant skill or learning doc.
+1. **Why was this not caught earlier?** — What review, test, or protocol gap allowed it through?
+2. **What procedural safeguard would have caught it?** — What specific check, test, or verification step would have prevented it?
+3. **Update the knowledge base** — Add the lesson to the relevant skill or learning doc.
 
 Violations in the pipeline process itself (wrong routing, missed gate, skipped step) should be logged as flags and added to the pipeline skill's lessons learned.
+
+---
+
+## How the Install Script Handles Conflicts
+
+The install script is **idempotent** — running it multiple times is safe.
+
+| Situation | Action |
+|-----------|--------|
+| File doesn't exist | Create it |
+| File exists, unmodified since last install | Update to new version |
+| File exists, modified by the user | Create a merge prompt at `.opencode/merge/<filename>.merge.md` |
+
+The merge prompt contains both the new version (upstream) and the current version (local), with instructions to resolve the conflict and delete the merge file when done.
+
+**`counters.json` is never overwritten** — your project's ticket/epic/ADR counter state is always preserved.
