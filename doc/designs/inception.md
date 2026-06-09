@@ -74,7 +74,7 @@ Agents implementing v1 must:
 * When naming module-specific components (sniffer wrappers, ingest bridges, parsers), use the module identifier `blesniff`.
 * Resist the temptation to over-generalize v1. The Bluetooth schema does not need to be sensor-agnostic; it needs to be correct and fast for Bluetooth. Future modules add new tables, not new abstractions over existing ones.
 
-**DECISION REQUIRED 0.1:** Confirm the prefix scheme. `RECOMMENDED DEFAULT: project = tianer, v1 module = blesniff, future modules use their own short prefixes`. If the operator prefers a different scheme (for example, project = `tianer` and the BLE module = `tianer-ble`), the agent updates all references consistently before the first commit.
+**DECISION REQUIRED 0.1:** Confirm the prefix scheme. `RESOLVED (D-01, D-02): project = tianer, v1 module = blesniff, future modules use their own short prefixes. Database name = tianer. Shared env vars = TIANER_*, module env vars = BLESNIFF_*.`
 
 ---
 
@@ -92,7 +92,7 @@ This document is structured for spec-driven development by autonomous agents. Co
 
 Agents must run the verification commands for a task before reporting it complete. If a verification fails, the agent must diagnose and fix before moving to the next task.
 
-All paths are absolute unless otherwise noted. All commands assume the user `blesniff` (created in section 6.1) unless noted as `root`.
+All paths are absolute unless otherwise noted. All commands assume the user `tianer` (created in section 6.1) unless noted as `root`.
 
 ---
 
@@ -144,9 +144,9 @@ The following are out of scope for the v1 Bluetooth module specifically. Items m
 | Sniffers excluded from v1 | nRF with AT-command serial output, ESP32 hex dumps |
 | Concurrent sniffers | 1 to 4, configurable |
 
-**DECISION REQUIRED 3.1:** Confirm operating system. `RECOMMENDED DEFAULT: Raspberry Pi OS 64-bit (Trixie, Debian 13)`. Trixie was released by Raspberry Pi as the new stable in October 2025 [^rpi-trixie], based on Debian 13 [^debian-trixie-release].
+**OS:** Raspberry Pi OS 64-bit (Trixie, Debian 13). See ADR-0001.
 
-**DECISION REQUIRED 3.2:** USB port to sniffer mapping. `RECOMMENDED DEFAULT: udev rules pin Ubertooth to /dev/blesniff/ubertooth0 and nRF dongles to /dev/blesniff/nrf{0,1,2} based on USB vendor:product ID and physical port path. Rule template provided in deploy/udev/99-blesniff.rules.` See section 6 for the full prerequisites including the udev rule format [^udev-rules].
+**USB mapping:** Persistent udev device names on host per D-03/Q4. See ADR-0001.
 
 ---
 
@@ -155,24 +155,25 @@ The following are out of scope for the v1 Bluetooth module specifically. Items m
 The entire platform lives in a single monorepo. Agents must respect this layout. New files outside this structure require a design update.
 
 ```
-ble-sniffer-platform/
+tian-er/
 ├── README.md                          # Project overview, quickstart
 ├── Makefile                           # Top-level commands (see section 13.1)
 ├── .editorconfig
 ├── .gitignore
 ├── .pre-commit-config.yaml            # Pre-commit hooks (formatters, linters)
-├── docs/
-│   ├── design.md                      # This document
-│   ├── runbooks/                      # Operational procedures
-│   │   ├── deploy.md
-│   │   ├── recover-from-disk-full.md
-│   │   └── add-new-sniffer.md
-│   └── adr/                           # Architecture Decision Records (one per resolved decision)
+├── doc/
+│   └── designs/                        # Design documents
+│       ├── inception.md                # This document
+│       ├── component-breakdown.md
+│       ├── storage-strategy.md
+│       └── ...                         # Per-component design docs (c01 through c14)
+│
 ├── deploy/
 │   ├── setup.sh                       # Idempotent host bootstrap
 │   ├── udev/
-│   │   └── 99-blesniff.rules
-│   ├── systemd/                       # All *.service and *.timer units
+│   │   └── 99-tianer.rules
+│   ├── containers/                     # Quadlet unit files
+│   ├── systemd/
 │   │   ├── blesniff-sniffer@.service
 │   │   ├── blesniff-tshark@.service
 │   │   ├── blesniff-ingest@.service
@@ -189,68 +190,70 @@ ble-sniffer-platform/
 │   │   ├── install-grafana.sh
 │   │   └── rotate-pcap.sh
 │   └── config/
-│       └── blesniff.env.example       # Documented environment template
-├── services/
-│   ├── sniffer-wrapper/               # Shell scripts that wrap each sniffer binary
-│   │   ├── ubertooth-wrap.sh
-│   │   ├── nrf-wrap.sh
-│   │   └── tests/
-│   ├── ingest-bridge/                 # C++17, libpqxx
-│   │   ├── CMakeLists.txt
-│   │   ├── src/
-│   │   │   ├── main.cpp
-│   │   │   ├── parser.cpp / .hpp      # Parse tshark fields output
-│   │   │   ├── batcher.cpp / .hpp     # Time + size batching
-│   │   │   ├── pg_writer.cpp / .hpp   # PostgreSQL COPY
-│   │   │   └── config.cpp / .hpp
-│   │   └── tests/                     # GoogleTest
-│   ├── gap-detector/                  # Python 3.12
+│       └── tianer.env.example         # Documented environment template
+├── modules/
+│   └── bluetooth/
+│       ├── sniffers/                   # Shell scripts that wrap each sniffer binary
+│       │   ├── ubertooth-wrap.sh
+│       │   ├── nrf-wrap.sh
+│       │   └── tests/
+│       ├── ingest-bridge/              # C++17, libpqxx
+│       │   ├── CMakeLists.txt
+│       │   ├── src/
+│       │   │   ├── main.cpp
+│       │   │   ├── parser.cpp / .hpp   # Parse tshark fields output
+│       │   │   ├── batcher.cpp / .hpp  # Time + size batching
+│       │   │   ├── pg_writer.cpp / .hpp # PostgreSQL COPY
+│       │   │   └── config.cpp / .hpp
+│       │   └── tests/                  # GoogleTest
+│       ├── gap-detector/               # Python 3.13
+│       │   ├── pyproject.toml
+│       │   ├── src/tianer_gapdet/
+│       │   │   ├── __init__.py
+│       │   │   ├── detector.py
+│       │   │   ├── backfill.py
+│       │   │   ├── pcap_reader.py
+│       │   │   └── db.py
+│       │   └── tests/                  # pytest
+│       ├── deep-parser/                # C++17, libpcap
+│       │   ├── CMakeLists.txt
+│       │   ├── src/
+│       │   │   ├── main.cpp
+│       │   │   ├── pcap_input.cpp / .hpp
+│       │   │   ├── ble_dissector.cpp / .hpp
+│       │   │   ├── advdata_parser.cpp / .hpp
+│       │   │   └── jsonl_output.cpp / .hpp
+│       │   └── tests/
+│       └── ml-enrichment/              # Python 3.13
+│           ├── pyproject.toml
+│           ├── src/tianer_ml/
+│           │   ├── classifier.py
+│           │   ├── clusterer.py        # RPA clustering (future)
+│           │   └── features.py
+│           └── tests/
+├── platform/
+│   ├── api/                            # Python FastAPI
 │   │   ├── pyproject.toml
-│   │   ├── src/blesniff_gapdet/
-│   │   │   ├── __init__.py
-│   │   │   ├── detector.py
-│   │   │   ├── backfill.py
-│   │   │   ├── pcap_reader.py
+│   │   ├── src/tianer_api/
+│   │   │   ├── main.py
+│   │   │   ├── routers/
+│   │   │   ├── models.py              # Pydantic models
 │   │   │   └── db.py
-│   │   └── tests/                     # pytest
-│   ├── deep-parser/                   # C++17, libpcap
-│   │   ├── CMakeLists.txt
-│   │   ├── src/
-│   │   │   ├── main.cpp
-│   │   │   ├── pcap_input.cpp / .hpp
-│   │   │   ├── ble_dissector.cpp / .hpp
-│   │   │   ├── advdata_parser.cpp / .hpp
-│   │   │   └── jsonl_output.cpp / .hpp
 │   │   └── tests/
-│   ├── ml-enrichment/                 # Python 3.12
-│   │   ├── pyproject.toml
-│   │   ├── src/blesniff_ml/
-│   │   │   ├── classifier.py
-│   │   │   ├── clusterer.py           # RPA clustering (future)
-│   │   │   └── features.py
-│   │   └── tests/
-│   └── api/                           # Python FastAPI
-│       ├── pyproject.toml
-│       ├── src/blesniff_api/
-│       │   ├── main.py
-│       │   ├── routers/
-│       │   ├── models.py              # Pydantic models
-│       │   └── db.py
-│       └── tests/
-├── frontend/                          # Vue 3 + Vite + TypeScript
-│   ├── package.json
-│   ├── tsconfig.json
-│   ├── vite.config.ts
-│   ├── src/
-│   │   ├── main.ts
-│   │   ├── App.vue
-│   │   ├── router/
-│   │   ├── stores/                    # Pinia
-│   │   ├── views/                     # DeviceList, DeviceDetail, Alerts, Health
-│   │   ├── components/
-│   │   ├── api/                       # Generated TypeScript API client
-│   │   └── types/
-│   └── tests/                         # Vitest + Vue Test Utils
+│   └── frontend/                       # Vue 3 + Vite + TypeScript
+│       ├── package.json
+│       ├── tsconfig.json
+│       ├── vite.config.ts
+│       ├── src/
+│       │   ├── main.ts
+│       │   ├── App.vue
+│       │   ├── router/
+│       │   ├── stores/                 # Pinia
+│       │   ├── views/                  # DeviceList, DeviceDetail, Alerts, Health
+│       │   ├── components/
+│       │   ├── api/                    # Generated TypeScript API client
+│       │   └── types/
+│       └── tests/                      # Vitest + Vue Test Utils
 ├── db/
 │   ├── migrations/                    # Numbered SQL migrations
 │   │   ├── 0001_init.sql
@@ -258,7 +261,7 @@ ble-sniffer-platform/
 │   │   ├── 0003_compression_policies.sql
 │   │   └── 0004_residency_classifier.sql
 │   ├── seed/                          # Seed data for tests
-│   └── tests/                         # pgTAP tests
+│   └── tests/                          # pgTAP tests
 ├── grafana/
 │   ├── provisioning/
 │   │   ├── datasources/
@@ -336,11 +339,11 @@ Version pins below are based on the verified state of upstream releases as of 20
 | Formatter (Python) | ruff format | 0.3 or later | replaces black |
 | Type check (Python) | mypy | 1.8 or later | strict |
 
-> Note on PostgreSQL major version: the choice of PG 17 over PG 18 is deliberate. PG 17 is the version shipped by the Debian Trixie apt repository [^debian-pg17], which means agents can install it via `apt install postgresql-17 postgresql-server-dev-17` without adding the PGDG repository. PG 18.4 is the current stable upstream [^pg184] and PG 19 Beta 1 is available as of June 4, 2026 [^pg19-beta], but agents would need to add the PGDG apt repository to obtain them. TimescaleDB 2.23 and later support PG 16, 17, and 18 [^ts-pg18], so the choice can be revisited via DECISION REQUIRED 5.0.1 below.
+> Note on PostgreSQL major version: the choice of PG 17 over PG 18 is deliberate. PG 17 is the version shipped by the Debian Trixie apt repository [^debian-pg17], which means agents can install it via `apt install postgresql-17 postgresql-server-dev-17` without adding the PGDG repository. PG 18.4 is the current stable upstream [^pg184] and PG 19 Beta 1 is available as of June 4, 2026 [^pg19-beta], but agents would need to add the PGDG apt repository to obtain them. TimescaleDB 2.23 and later support PG 16, 17, and 18 [^ts-pg18], so the choice can be revisited. See ADR-0001 for the resolved decision.
 
-**DECISION REQUIRED 5.0.1:** Use PG 17 (Trixie default) or PG 18 (current stable upstream, available via PGDG apt repo). `RECOMMENDED DEFAULT: PG 17` for simpler installation. Switch to PG 18 if specific PG 18 features (e.g., enhanced query parallelism) are needed; this requires adding the PGDG repository per [^ts-install].
+**PostgreSQL:** 17 (Trixie default). See ADR-0001.
 
-**DECISION REQUIRED 5.0.2:** Use Python 3.13 (Trixie default) or 3.14 (current upstream). `RECOMMENDED DEFAULT: Python 3.13`. The performance gap between 3.13 and 3.14 is small for this workload, and 3.13 is what `apt install python3.13` provides on Trixie without third-party repositories.
+**Python:** 3.13 (Trixie default). See ADR-0001.
 
 
 ---
@@ -349,15 +352,15 @@ Version pins below are based on the verified state of upstream releases as of 20
 
 This section defines all OS-level prerequisites that must be satisfied before any service in section 8 can run. It covers user and group setup (so that no service requires `root` or `sudo` at runtime), file capabilities for tools that need privileged access (notably `dumpcap`), udev rules that grant hardware access via group membership, file system layout, and runtime configuration files.
 
-The guarantee: after section 6.1 through 6.4 are complete, every command listed in section 8 onwards can be executed by the `blesniff` system user with no `sudo` and no `root`.
+The guarantee: after section 6.1 through 6.4 are complete, every command listed in section 8 onwards can be executed by the `tianer` system user with no `sudo` and no `root`.
 
 ### 6.1 Service User and Group Setup
 
-A dedicated unprivileged system user `blesniff` owns all platform processes. It is added to the following groups:
+A dedicated unprivileged system user `tianer` owns all platform processes. It is added to the following groups:
 
 | Group | Reason | Reference |
 |-------|--------|-----------|
-| `blesniff` | Primary group, owns service files | n/a |
+| `tianer` | Primary group, owns service files | n/a |
 | `plugdev` | USB device access for Ubertooth via udev rule | Ubertooth Getting Started guide [^ubertooth-getting-started] |
 | `dialout` | Serial port access (`/dev/ttyACM*` for nRF dongles) | Debian convention; default group ownership of TTY devices |
 | `wireshark` | Permission to invoke `dumpcap` for live capture (which tshark uses when reading from a FIFO) | Wireshark capture privileges documentation [^wireshark-privileges] |
@@ -370,15 +373,15 @@ A dedicated unprivileged system user `blesniff` owns all platform processes. It 
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 1. Create blesniff system user with home in /var/lib/blesniff, no login shell.
-if ! id -u blesniff >/dev/null 2>&1; then
+# 1. Create tianer system user with home in /var/lib/tianer, no login shell.
+if ! id -u tianer >/dev/null 2>&1; then
     useradd --system \
-            --home-dir /var/lib/blesniff \
+            --home-dir /var/lib/tianer \
             --create-home \
             --shell /usr/sbin/nologin \
             --user-group \
-            --comment "BLE Sniffer Platform service user" \
-            blesniff
+            --comment "Tian'er Signal Intelligence Platform service user" \
+            tianer
 fi
 
 # 2. Ensure required groups exist. plugdev and dialout exist by default on
@@ -390,25 +393,25 @@ for grp in plugdev dialout wireshark; do
     fi
 done
 
-# 3. Add blesniff to all required groups. usermod -aG is the idempotent form.
-usermod -aG plugdev,dialout,wireshark blesniff
+# 3. Add tianer to all required groups. usermod -aG is the idempotent form.
+usermod -aG plugdev,dialout,wireshark tianer
 
 # 4. Verify membership.
-groups blesniff
+groups tianer
 ```
 
 The script uses `usermod -aG` to append group memberships [^usermod-man]. The `-a` flag preserves existing memberships; without it, `usermod -G` would replace them and lock the user out of any unlisted groups.
 
 **ACCEPTANCE CRITERIA for 6.1:**
-1. `id blesniff` lists `blesniff` plus `plugdev`, `dialout`, `wireshark` among its groups.
-2. The user has no login shell (verified by `getent passwd blesniff | awk -F: '{print $7}'` returning `/usr/sbin/nologin`).
+1. `id tianer` lists `tianer` plus `plugdev`, `dialout`, `wireshark` among its groups.
+2. The user has no login shell (verified by `getent passwd tianer | awk -F: '{print $7}'` returning `/usr/sbin/nologin`).
 3. Re-running `create-user.sh` produces no errors.
 
 **VERIFICATION:**
 ```bash
 sudo deploy/scripts/create-user.sh
-id blesniff | grep -qE 'plugdev.*dialout.*wireshark|wireshark.*plugdev|dialout.*plugdev.*wireshark'
-[[ "$(getent passwd blesniff | cut -d: -f7)" == "/usr/sbin/nologin" ]]
+id tianer | grep -qE 'plugdev.*dialout.*wireshark|wireshark.*plugdev|dialout.*plugdev.*wireshark'
+[[ "$(getent passwd tianer | cut -d: -f7)" == "/usr/sbin/nologin" ]]
 ```
 
 ### 6.2 udev Rules for Sniffer Hardware
@@ -417,44 +420,54 @@ USB sniffer devices are owned by `root:plugdev` with mode `0660` via udev rules.
 
 **Ubertooth One:** USB vendor ID `1d50:6002` [^ubertooth-getting-started].
 
-**Nordic nRF52840 Dongle (sniffer firmware):** USB vendor ID `1915:520f` when running the nRF Sniffer firmware. The dongle also presents as a USB CDC ACM serial device at `/dev/ttyACM*`; `dialout` group grants access to that node, while `plugdev` covers the raw USB device.
+**Nordic nRF52840 Dongle (sniffer firmware):** USB vendor ID `1915:522A` (primary, sniffer mode) or `1915:520f` (secondary, DFU/bootloader mode). The dongle also presents as a USB CDC ACM serial device at `/dev/ttyACM*`; `dialout` group grants access to that node, while `plugdev` covers the raw USB device.
 
-`deploy/udev/99-blesniff.rules`:
+`deploy/udev/99-tianer.rules`:
 
 ```
 # Ubertooth One - USB-only access via libusb. Group plugdev.
 SUBSYSTEM=="usb", ATTRS{idVendor}=="1d50", ATTRS{idProduct}=="6002", \
     GROUP="plugdev", MODE="0660", \
-    SYMLINK+="blesniff/ubertooth%n"
+    SYMLINK+="tianer/ubertooth%n"
 
 # Nordic nRF52840 Dongle running nRF Sniffer firmware. Raw USB access via plugdev,
 # serial node already group dialout by default.
+# Primary PID 522A (sniffer mode); secondary PID 520f (DFU/bootloader mode).
+# Both supported per D-03/Q3 resolution. Actual PID determined during detailed
+# design phase with connected hardware.
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1915", ATTRS{idProduct}=="522a", \
+    GROUP="plugdev", MODE="0660"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1915", ATTRS{idProduct}=="522a", \
+    SYMLINK+="tianer/nrf%n", \
+    GROUP="dialout", MODE="0660"
 SUBSYSTEM=="usb", ATTRS{idVendor}=="1915", ATTRS{idProduct}=="520f", \
     GROUP="plugdev", MODE="0660"
 SUBSYSTEM=="tty", ATTRS{idVendor}=="1915", ATTRS{idProduct}=="520f", \
-    SYMLINK+="blesniff/nrf%n", \
+    SYMLINK+="tianer/nrf%n", \
     GROUP="dialout", MODE="0660"
 
 # Nordic nRF52840 DK (development kit) - alternative ID set
 SUBSYSTEM=="usb", ATTRS{idVendor}=="1366", \
     GROUP="plugdev", MODE="0660"
 SUBSYSTEM=="tty", ATTRS{idVendor}=="1366", \
-    SYMLINK+="blesniff/nrf%n", \
+    SYMLINK+="tianer/nrf%n", \
     GROUP="dialout", MODE="0660"
 ```
 
-**DECISION REQUIRED 6.2.1:** Confirm actual vendor:product ID pairs by running `lsusb` with each device plugged in. `RECOMMENDED DEFAULT: validate during T01 against connected hardware and update the rule with the exact values observed`. The Ubertooth value above is from the official Ubertooth Getting Started documentation [^ubertooth-getting-started]; the Nordic value should be verified, since dongle firmware changes can shift the product ID.
+**NOTE:** The nRF52840 USB PID (`1915:520f` in the rule above) is a placeholder. The actual sniffer firmware PID must be verified against connected hardware during T01. The project's `nrf52840-sniffer` skill documents PID `1915:522A` as the confirmed sniffer firmware PID. Per D-03/Q3 resolution: support both `522A` (primary, sniffer mode) and `520f` (secondary, DFU/bootloader mode). The exact value will be determined during the detailed hardware design phase.
+
+**USB PID:** Dual-support 1915:522A (sniffer) + 1915:520f (DFU). Verification during T01. See ADR-0001.
 
 Apply rules:
 ```bash
-sudo install -m 0644 deploy/udev/99-blesniff.rules /etc/udev/rules.d/99-blesniff.rules
+sudo install -m 0644 deploy/udev/99-tianer.rules /etc/udev/rules.d/99-tianer.rules
 sudo udevadm control --reload-rules
 sudo udevadm trigger
 ```
 
 **ACCEPTANCE CRITERIA for 6.2:**
-1. With an Ubertooth plugged in, `ls -l /dev/blesniff/ubertooth0` shows the symlink and the target file is `root:plugdev` mode `0660`.
-2. The `blesniff` user can read the device: `sudo -u blesniff -g plugdev ubertooth-util -v` succeeds.
+1. With an Ubertooth plugged in, `ls -l /dev/tianer/ubertooth0` shows the symlink and the target file is `root:plugdev` mode `0660`.
+2. The `tianer` user can read the device: `sudo -u tianer -g plugdev ubertooth-util -v` succeeds.
 3. Equivalent for nRF dongle.
 
 ### 6.3 Wireshark / dumpcap Capability Setup
@@ -483,7 +496,7 @@ DEBIAN_FRONTEND=noninteractive dpkg-reconfigure wireshark-common
 #    applies cap_net_raw,cap_net_admin+eip via setcap. Verify.
 getcap /usr/bin/dumpcap | grep -q 'cap_net_admin.*cap_net_raw\|cap_net_raw.*cap_net_admin'
 
-# 4. blesniff user is already in the wireshark group via create-user.sh.
+# 4. tianer user is already in the wireshark group via create-user.sh.
 ```
 
 `setcap` applies file capabilities to the binary [^setcap-man]. The capability set `cap_net_raw,cap_net_admin+eip` grants effective, inherited, and permitted bits, allowing dumpcap to capture without setuid root.
@@ -492,23 +505,23 @@ getcap /usr/bin/dumpcap | grep -q 'cap_net_admin.*cap_net_raw\|cap_net_raw.*cap_
 
 **ACCEPTANCE CRITERIA for 6.3:**
 1. `getcap /usr/bin/dumpcap` shows `cap_net_admin,cap_net_raw+eip` (order may vary).
-2. The `blesniff` user can run a capture from a FIFO: `sudo -u blesniff tshark -i /var/run/blesniff/test.fifo -c 1` does not return EPERM.
+2. The `tianer` user can run a capture from a FIFO: `sudo -u tianer tshark -i /var/run/tianer/test.fifo -c 1` does not return EPERM.
 3. The same command run as a user not in `wireshark` fails with a permission error.
 
 ### 6.4 File System Layout and Ownership
 
-All paths used by the platform are pre-created with `blesniff:blesniff` ownership before any service starts. systemd-tmpfiles handles paths under `/var/run/`; a setup script handles persistent paths.
+All paths used by the platform are pre-created with `tianer:tianer` ownership before any service starts. systemd-tmpfiles handles paths under `/var/run/`; a setup script handles persistent paths.
 
-`/etc/tmpfiles.d/blesniff.conf` (managed by systemd-tmpfiles at boot) [^tmpfiles-d]:
+`/etc/tmpfiles.d/tianer.conf` (managed by systemd-tmpfiles at boot) [^tmpfiles-d]:
 
 ```
 # Type Path                            Mode UID       GID       Age Argument
-d      /var/run/blesniff               0750 blesniff  blesniff  -   -
-d      /var/log/blesniff               0750 blesniff  blesniff  -   -
-p      /var/run/blesniff/ut1.fifo      0660 blesniff  blesniff  -   -
-p      /var/run/blesniff/nrf1.fifo     0660 blesniff  blesniff  -   -
-p      /var/run/blesniff/nrf2.fifo     0660 blesniff  blesniff  -   -
-p      /var/run/blesniff/nrf3.fifo     0660 blesniff  blesniff  -   -
+d      /var/run/tianer                 0750 tianer    tianer    -   -
+d      /var/log/tianer                 0750 tianer    tianer    -   -
+p      /var/run/tianer/ut1.fifo        0660 tianer    tianer    -   -
+p      /var/run/tianer/nrf1.fifo       0660 tianer    tianer    -   -
+p      /var/run/tianer/nrf2.fifo       0660 tianer    tianer    -   -
+p      /var/run/tianer/nrf3.fifo       0660 tianer    tianer    -   -
 ```
 
 `deploy/scripts/create-dirs.sh` (persistent paths, run once):
@@ -517,51 +530,53 @@ p      /var/run/blesniff/nrf3.fifo     0660 blesniff  blesniff  -   -
 #!/usr/bin/env bash
 set -euo pipefail
 
-install -d -o blesniff -g blesniff -m 0750 /var/lib/blesniff
-install -d -o blesniff -g blesniff -m 0750 /var/lib/blesniff/pcap
-install -d -o blesniff -g blesniff -m 0700 /etc/blesniff
-install -d -o blesniff -g blesniff -m 0700 /etc/blesniff/secrets
-install -d -o blesniff -g blesniff -m 0750 /opt/blesniff
-install -d -o root     -g root     -m 0755 /usr/share/blesniff
-install -d -o root     -g root     -m 0755 /usr/share/blesniff/frontend
-install -d -o root     -g root     -m 0755 /usr/share/blesniff/migrations
-install -d -o root     -g root     -m 0755 /usr/local/lib/blesniff/wrap
+install -d -o tianer -g tianer -m 0750 /var/lib/tianer
+install -d -o tianer -g tianer -m 0750 /var/lib/tianer/pcap
+install -d -o tianer -g tianer -m 0700 /etc/tianer
+install -d -o tianer -g tianer -m 0700 /etc/tianer/secrets
+install -d -o tianer -g tianer -m 0750 /opt/tianer
+install -d -o root     -g root     -m 0755 /usr/share/tianer
+install -d -o root     -g root     -m 0755 /usr/share/tianer/frontend
+install -d -o root     -g root     -m 0755 /usr/share/tianer/migrations
+install -d -o root     -g root     -m 0755 /usr/local/lib/tianer/wrap
 
 # Apply tmpfiles.d immediately for non-persistent paths so we don't need to reboot.
-systemd-tmpfiles --create /etc/tmpfiles.d/blesniff.conf
+systemd-tmpfiles --create /etc/tmpfiles.d/tianer.conf
 ```
 
 **ACCEPTANCE CRITERIA for 6.4:**
-1. `stat -c '%U %G %a' /var/lib/blesniff` returns `blesniff blesniff 750`.
-2. `stat -c '%U %G %a' /etc/blesniff/secrets` returns `blesniff blesniff 700`.
-3. After reboot, FIFOs at `/var/run/blesniff/*.fifo` exist with mode `0660` and owner `blesniff:blesniff`.
+1. `stat -c '%U %G %a' /var/lib/tianer` returns `tianer tianer 750`.
+2. `stat -c '%U %G %a' /etc/tianer/secrets` returns `tianer tianer 700`.
+3. After reboot, FIFOs at `/var/run/tianer/*.fifo` exist with mode `0660` and owner `tianer:tianer`.
 
 ### 6.5 systemd Unit Privilege Drop
 
-Every blesniff systemd unit declares `User=blesniff` and `Group=blesniff`, so processes always run unprivileged [^systemd-exec-user]. Capabilities are not granted to units (only to specific binaries via setcap in section 6.3).
+Every tianer systemd unit declares `User=tianer` and `Group=tianer`, so processes always run unprivileged [^systemd-exec-user]. Capabilities are not granted to units (only to specific binaries via setcap in section 6.3).
 
 Example skeleton applied to every unit in `deploy/systemd/`:
 
 ```ini
 [Service]
-User=blesniff
-Group=blesniff
+User=tianer
+Group=tianer
 SupplementaryGroups=plugdev dialout wireshark
-EnvironmentFile=/etc/blesniff/blesniff.env
+EnvironmentFile=/etc/tianer/tianer.env
+# Module-specific override also available:
+# EnvironmentFile=/etc/tianer/blesniff.env
 
 # Hardening (per systemd.exec documentation)
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=/var/lib/blesniff /var/log/blesniff /var/run/blesniff
+ReadWritePaths=/var/lib/tianer /var/log/tianer /var/run/tianer
 ```
 
 `SupplementaryGroups=` ensures the process has the necessary auxiliary groups even if the user database is read in a restricted execution environment [^systemd-exec-user]. `NoNewPrivileges=true` blocks setuid escalation [^systemd-exec-hardening]. `ReadWritePaths=` grants write access to the platform's data directories while `ProtectSystem=strict` makes the rest of the filesystem read-only to the service.
 
 **ACCEPTANCE CRITERIA for 6.5:**
-1. `systemctl show blesniff-api.service -p User -p Group` returns `User=blesniff` `Group=blesniff`.
-2. `ps -o user,group,cmd -p $(pgrep blesniff-api)` shows `blesniff blesniff` (not `root`).
+1. `systemctl show blesniff-api.service -p User -p Group` returns `User=tianer` `Group=tianer`.
+2. `ps -o user,group,cmd -p $(pgrep blesniff-api)` shows `tianer tianer` (not `root`).
 3. No `sudo` lines exist in any systemd unit's `ExecStart=`.
 
 ### 6.6 PostgreSQL Role Setup
@@ -572,23 +587,32 @@ PostgreSQL is installed by `apt install postgresql-17` [^debian-pg17]. The defau
 
 ```sql
 -- Main service role: owns the schema, can DDL and DML.
-CREATE ROLE blesniff WITH LOGIN PASSWORD :'blesniff_pw';
-CREATE DATABASE blesniff OWNER blesniff;
+CREATE ROLE tianer WITH LOGIN PASSWORD :'tianer_pw';
+CREATE DATABASE tianer OWNER tianer;
 
 -- Read-only role used by Grafana.
-CREATE ROLE blesniff_grafana WITH LOGIN PASSWORD :'grafana_pw';
-GRANT CONNECT ON DATABASE blesniff TO blesniff_grafana;
-\c blesniff
-GRANT USAGE ON SCHEMA public TO blesniff_grafana;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO blesniff_grafana;
+CREATE ROLE tianer_grafana WITH LOGIN PASSWORD :'grafana_pw';
+GRANT CONNECT ON DATABASE tianer TO tianer_grafana;
+\c tianer
+GRANT USAGE ON SCHEMA bluetooth TO tianer_grafana;
+ALTER DEFAULT PRIVILEGES IN SCHEMA bluetooth GRANT SELECT ON TABLES TO tianer_grafana;
 
 -- Read-only role used by the API for queries that don't need write access.
--- The API uses blesniff for writes (continuous aggregate refresh, residency
--- classification job) and blesniff_ro for read-only endpoints.
-CREATE ROLE blesniff_ro WITH LOGIN PASSWORD :'ro_pw';
-GRANT CONNECT ON DATABASE blesniff TO blesniff_ro;
-GRANT USAGE ON SCHEMA public TO blesniff_ro;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO blesniff_ro;
+-- The API uses tianer for writes (continuous aggregate refresh, residency
+-- classification job) and tianer_ro for read-only endpoints.
+CREATE ROLE tianer_ro WITH LOGIN PASSWORD :'ro_pw';
+GRANT CONNECT ON DATABASE tianer TO tianer_ro;
+GRANT USAGE ON SCHEMA bluetooth TO tianer_ro;
+ALTER DEFAULT PRIVILEGES IN SCHEMA bluetooth GRANT SELECT ON TABLES TO tianer_ro;
+
+-- Write-only role for ingest bridge and gap detector streams.
+-- Can INSERT and COPY but cannot SELECT or DDL.
+-- Per Q9 resolution: write-only for streams, read-only for UI.
+CREATE ROLE tianer_writer WITH LOGIN PASSWORD :'writer_pw';
+GRANT CONNECT ON DATABASE tianer TO tianer_writer;
+GRANT USAGE ON SCHEMA bluetooth TO tianer_writer;
+GRANT INSERT ON ALL TABLES IN SCHEMA bluetooth TO tianer_writer;
+ALTER DEFAULT PRIVILEGES IN SCHEMA bluetooth GRANT INSERT ON TABLES TO tianer_writer;
 ```
 
 `pg_hba.conf` is configured for local Unix-socket connections only (peer auth for `postgres`, md5/scram for the three app roles), with the host loopback also allowed for the API and Grafana service connections:
@@ -596,14 +620,15 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO blesniff_ro;
 ```
 # Local administration via Unix socket
 local   all             postgres                                peer
-local   blesniff        blesniff                                scram-sha-256
-local   blesniff        blesniff_grafana                        scram-sha-256
-local   blesniff        blesniff_ro                             scram-sha-256
+local   tianer          tianer                                  scram-sha-256
+local   tianer          tianer_grafana                          scram-sha-256
+local   tianer          tianer_ro                               scram-sha-256
 
-# Loopback TCP (Grafana, API)
-host    blesniff        blesniff_grafana    127.0.0.1/32        scram-sha-256
-host    blesniff        blesniff_ro         127.0.0.1/32        scram-sha-256
-host    blesniff        blesniff            127.0.0.1/32        scram-sha-256
+# Loopback TCP (Grafana, API, writer)
+host    tianer          tianer_grafana    127.0.0.1/32          scram-sha-256
+host    tianer          tianer_ro         127.0.0.1/32          scram-sha-256
+host    tianer          tianer            127.0.0.1/32          scram-sha-256
+host    tianer          tianer_writer     127.0.0.1/32          scram-sha-256
 
 # Reject everything else
 host    all             all                 0.0.0.0/0           reject
@@ -611,8 +636,8 @@ host    all             all                 ::/0                reject
 ```
 
 **ACCEPTANCE CRITERIA for 6.6:**
-1. `sudo -u blesniff psql -h 127.0.0.1 -U blesniff -d blesniff -c 'SELECT 1'` succeeds without prompting for system password.
-2. `sudo -u blesniff psql -h 127.0.0.1 -U blesniff_ro -d blesniff -c 'INSERT INTO sniffers VALUES (1)'` fails with a permission error.
+1. `sudo -u tianer psql -h 127.0.0.1 -U tianer -d tianer -c 'SELECT 1'` succeeds without prompting for system password.
+2. `sudo -u tianer psql -h 127.0.0.1 -U tianer_ro -d tianer -c 'INSERT INTO sniffers VALUES (1)'` fails with a permission error.
 3. From a different host on the LAN, `psql -h <pi> ...` is rejected.
 
 ### 6.7 sudo Policy
@@ -627,26 +652,28 @@ The only legitimate `sudo` invocations are at install time (running `deploy/setu
 
 **ACCEPTANCE CRITERIA for 6.7:**
 1. `grep -r sudo deploy/systemd/` returns nothing.
-2. `ls /etc/sudoers.d/blesniff*` returns no files.
+2. `ls /etc/sudoers.d/tianer*` returns no files.
 
 ### 6.8 Configuration Files
 
-All runtime configuration lives in `/etc/blesniff/blesniff.env` (sourced by every systemd unit) and `/etc/blesniff/sniffers.yaml` (per-sniffer settings). Both files are mode `0640`, owned by `root:blesniff` so that the service can read them but only an administrator can edit them.
+All runtime configuration lives in `/etc/tianer/tianer.env` (shared, sourced by every systemd unit) and `/etc/tianer/sniffers.yaml` (per-sniffer settings). Both files are mode `0640`, owned by `root:tianer` so that the service can read them but only an administrator can edit them.
 
 #### 6.8.1 `blesniff.env` (key-value, shell-sourced)
+
+The Bluetooth module uses `/etc/tianer/blesniff.env` for module-specific settings:
 
 ```bash
 # Database
 BLESNIFF_DB_HOST=127.0.0.1
 BLESNIFF_DB_PORT=5432
-BLESNIFF_DB_NAME=blesniff
-BLESNIFF_DB_USER=blesniff
-BLESNIFF_DB_PASSWORD_FILE=/etc/blesniff/secrets/db_password
+BLESNIFF_DB_NAME=tianer
+BLESNIFF_DB_USER=tianer
+BLESNIFF_DB_PASSWORD_FILE=/etc/tianer/secrets/db_password
 
 # Paths
-BLESNIFF_PCAP_DIR=/var/lib/blesniff/pcap
-BLESNIFF_FIFO_DIR=/var/run/blesniff
-BLESNIFF_LOG_DIR=/var/log/blesniff
+BLESNIFF_PCAP_DIR=/var/lib/tianer/pcap
+BLESNIFF_FIFO_DIR=/var/run/tianer
+BLESNIFF_LOG_DIR=/var/log/tianer
 
 # Rotation
 BLESNIFF_ROTATION_MINUTES=30
@@ -666,10 +693,10 @@ BLESNIFF_GAP_LOOKBACK_HOURS=1
 # API
 BLESNIFF_API_HOST=127.0.0.1
 BLESNIFF_API_PORT=8080
-BLESNIFF_API_KEY_FILE=/etc/blesniff/secrets/api_key
+BLESNIFF_API_KEY_FILE=/etc/tianer/secrets/api_key
 
 # Frontend
-BLESNIFF_FRONTEND_DIR=/usr/share/blesniff/frontend
+BLESNIFF_FRONTEND_DIR=/usr/share/tianer/frontend
 BLESNIFF_GRAFANA_URL=http://127.0.0.1:3000
 ```
 
@@ -680,32 +707,32 @@ sniffers:
   - id: 1
     name: ut1
     type: ubertooth
-    device: /dev/blesniff/ubertooth0
+    device: /dev/tianer/ubertooth0
     mode: btle           # btle | rx (Classic survey)
     channels: [37, 38, 39]
     enabled: true
   - id: 2
     name: nrf1
     type: nrf
-    device: /dev/blesniff/nrf0
+    device: /dev/tianer/nrf0
     mode: ble
     enabled: true
   - id: 3
     name: nrf2
     type: nrf
-    device: /dev/blesniff/nrf1
+    device: /dev/tianer/nrf1
     enabled: false
   - id: 4
     name: nrf3
     type: nrf
-    device: /dev/blesniff/nrf2
+    device: /dev/tianer/nrf2
     enabled: false
 ```
 
 #### 6.8.3 Secrets
 
-* `/etc/blesniff/secrets/db_password`, `/etc/blesniff/secrets/api_key`, `/etc/blesniff/secrets/grafana_db_password`.
-* Mode `0600`, owner `blesniff:blesniff`.
+* `/etc/tianer/secrets/db_password`, `/etc/tianer/secrets/api_key`, `/etc/tianer/secrets/grafana_db_password`.
+* Mode `0600`, owner `tianer:tianer`.
 * Generated by `deploy/scripts/generate-secrets.sh` on first run; idempotent (does not overwrite).
 * Never committed to the repository.
 
@@ -724,9 +751,9 @@ After 6.1 through 6.8 are complete, the following must hold. This block is run b
 set -euo pipefail
 
 # User and groups
-id blesniff >/dev/null || { echo FAIL: user; exit 1; }
+id tianer >/dev/null || { echo FAIL: user; exit 1; }
 for grp in plugdev dialout wireshark; do
-    id -nG blesniff | grep -qw "$grp" || { echo "FAIL: not in $grp"; exit 1; }
+    id -nG tianer | grep -qw "$grp" || { echo "FAIL: not in $grp"; exit 1; }
 done
 
 # Capabilities
@@ -734,21 +761,21 @@ getcap /usr/bin/dumpcap | grep -q 'cap_net_raw.*cap_net_admin\|cap_net_admin.*ca
     { echo FAIL: dumpcap caps; exit 1; }
 
 # Paths
-[[ "$(stat -c '%U:%G:%a' /var/lib/blesniff)" == "blesniff:blesniff:750" ]] || { echo FAIL: /var/lib/blesniff; exit 1; }
-[[ "$(stat -c '%U:%G:%a' /etc/blesniff/secrets)" == "blesniff:blesniff:700" ]] || { echo FAIL: /etc/blesniff/secrets; exit 1; }
+[[ "$(stat -c '%U:%G:%a' /var/lib/tianer)" == "tianer:tianer:750" ]] || { echo FAIL: /var/lib/tianer; exit 1; }
+[[ "$(stat -c '%U:%G:%a' /etc/tianer/secrets)" == "tianer:tianer:700" ]] || { echo FAIL: /etc/tianer/secrets; exit 1; }
 
 # udev rule installed
-[[ -f /etc/udev/rules.d/99-blesniff.rules ]] || { echo FAIL: udev rule; exit 1; }
+[[ -f /etc/udev/rules.d/99-tianer.rules ]] || { echo FAIL: udev rule; exit 1; }
 
 # Database
-sudo -u blesniff psql -h 127.0.0.1 -U blesniff -d blesniff -c 'SELECT 1' >/dev/null || { echo FAIL: db connect; exit 1; }
+sudo -u tianer psql -h 127.0.0.1 -U tianer -d tianer -c 'SELECT 1' >/dev/null || { echo FAIL: db connect; exit 1; }
 
 # sudo policy
-[[ ! -f /etc/sudoers.d/blesniff ]] || { echo FAIL: sudoers entry exists; exit 1; }
+[[ ! -f /etc/sudoers.d/tianer ]] || { echo FAIL: sudoers entry exists; exit 1; }
 
-# Smoke: blesniff can read sniffer device (assuming one is plugged in; skip otherwise)
-if [[ -e /dev/blesniff/ubertooth0 ]]; then
-    sudo -u blesniff ubertooth-util -v >/dev/null || { echo FAIL: ubertooth access; exit 1; }
+# Smoke: tianer can read sniffer device (assuming one is plugged in; skip otherwise)
+if [[ -e /dev/tianer/ubertooth0 ]]; then
+    sudo -u tianer ubertooth-util -v >/dev/null || { echo FAIL: ubertooth access; exit 1; }
 fi
 
 echo "PREREQUISITES OK"
@@ -828,6 +855,8 @@ echo "PREREQUISITES OK"
 
 ## 8. Component Specifications
 
+**Deployment Model (Q1/Q11 resolution):** All components run in Podman containers managed by Quadlet. USB devices are passed through from the host. Persistent storage uses the volume strategy documented in `doc/designs/storage-strategy.md`. The systemd-based descriptions below are retained for per-component logic; the containerized deployment model supersedes the bare-metal service descriptions for operational concerns.
+
 Each component section follows the same structure:
 
 * **Purpose**
@@ -843,7 +872,7 @@ Each component section follows the same structure:
 
 **Inputs:**
 * `sniffers.yaml` (read by systemd unit template)
-* `/etc/blesniff/blesniff.env`
+* `/etc/tianer/blesniff.env`
 
 **Outputs:**
 * PCAP stream into `${BLESNIFF_PCAP_DIR}/<sniffer_name>/current.pcap`
@@ -851,12 +880,13 @@ Each component section follows the same structure:
 
 **Implementation:**
 
-`services/sniffer-wrapper/ubertooth-wrap.sh`:
+`modules/bluetooth/sniffers/ubertooth-wrap.sh`:
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-source /etc/blesniff/blesniff.env
+source /etc/tianer/tianer.env
+source /etc/tianer/blesniff.env
 
 SNIFFER_NAME="${1:?sniffer name required}"
 DEVICE="${2:?device path required}"
@@ -903,9 +933,9 @@ A separate `heartbeat.sh` companion process runs alongside the sniffer wrapper f
 
 | Test | Type | File |
 |------|------|------|
-| Wrapper creates FIFO if missing | Unit | `services/sniffer-wrapper/tests/test_fifo_create.bats` |
+| Wrapper creates FIFO if missing | Unit | `modules/bluetooth/sniffers/tests/test_fifo_create.bats` |
 | Wrapper writes to both file and FIFO | Integration | `tests/integration/test_dual_write.sh` |
-| Wrapper handles invalid mode argument | Unit | `services/sniffer-wrapper/tests/test_args.bats` |
+| Wrapper handles invalid mode argument | Unit | `modules/bluetooth/sniffers/tests/test_args.bats` |
 | Heartbeat row updated every 30s | Integration | `tests/integration/test_heartbeat.sh` |
 
 **ACCEPTANCE CRITERIA:**
@@ -917,7 +947,7 @@ A separate `heartbeat.sh` companion process runs alongside the sniffer wrapper f
 **VERIFICATION:**
 ```bash
 # Start in test mode
-./services/sniffer-wrapper/ubertooth-wrap.sh ut1-test /dev/blesniff/ubertooth0 btle &
+./modules/bluetooth/sniffers/ubertooth-wrap.sh ut1-test /dev/tianer/ubertooth0 btle &
 sleep 10
 # Verify file is valid PCAP
 tshark -r "${BLESNIFF_PCAP_DIR}/ut1-test/current.pcap" -c 1
@@ -1005,16 +1035,16 @@ ls -la "${BLESNIFF_PCAP_DIR}/ut1-test/" | grep -E '[0-9]{8}-[0-9]{4}\.pcap'
 
 **Implementation:**
 
-`/etc/tmpfiles.d/blesniff.conf`:
+`/etc/tmpfiles.d/tianer.conf`:
 ```
-d /var/run/blesniff 0750 blesniff blesniff -
-p /var/run/blesniff/ut1.fifo 0660 blesniff blesniff -
-p /var/run/blesniff/nrf1.fifo 0660 blesniff blesniff -
-p /var/run/blesniff/nrf2.fifo 0660 blesniff blesniff -
-p /var/run/blesniff/nrf3.fifo 0660 blesniff blesniff -
+d /var/run/tianer 0750 tianer tianer -
+p /var/run/tianer/ut1.fifo 0660 tianer tianer -
+p /var/run/tianer/nrf1.fifo 0660 tianer tianer -
+p /var/run/tianer/nrf2.fifo 0660 tianer tianer -
+p /var/run/tianer/nrf3.fifo 0660 tianer tianer -
 ```
 
-`systemd-tmpfiles --create /etc/tmpfiles.d/blesniff.conf` runs at boot.
+`systemd-tmpfiles --create /etc/tmpfiles.d/tianer.conf` runs at boot.
 
 **Dependency ordering:** tshark unit specifies `Before=blesniff-sniffer@.service` to ensure the reader is up before writes begin. Without this, sniffer writes to a readerless pipe drop bytes.
 
@@ -1026,7 +1056,7 @@ p /var/run/blesniff/nrf3.fifo 0660 blesniff blesniff -
 ```bash
 systemctl reboot
 # After reboot:
-ls -la /var/run/blesniff/*.fifo  # All present
+ls -la /var/run/tianer/*.fifo  # All present
 systemctl status blesniff-tshark@ut1.service blesniff-sniffer@ut1.service
 # tshark "Active since" timestamp must precede sniffer "Active since"
 ```
@@ -1041,12 +1071,12 @@ systemctl status blesniff-tshark@ut1.service blesniff-sniffer@ut1.service
 
 **Implementation:**
 
-`services/sniffer-wrapper/tshark-wrap.sh`:
+`modules/bluetooth/sniffers/tshark-wrap.sh`:
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-source /etc/blesniff/blesniff.env
+source /etc/tianer/blesniff.env
 
 SNIFFER_NAME="${1:?}"
 FIFO="${BLESNIFF_FIFO_DIR}/${SNIFFER_NAME}.fifo"
@@ -1065,7 +1095,7 @@ exec tshark -i "${FIFO}" -l -n \
   -e btle.advertising_data
 ```
 
-**DECISION REQUIRED 8.4.1:** Exact field names per DLT. `RECOMMENDED DEFAULT: Field names listed above are starting candidates and must be verified by running tshark -G fields | grep -E 'btle|nordic_ble' on the actual installation. T07 includes a verification step that produces a confirmed field list committed to docs/tshark-fields.md.`
+**tshark fields:** Per-DLT parameterized config. Field names verified during T07. See ADR-0001.
 
 **DECISION REQUIRED 8.4.2:** Parse-failure behavior. `RECOMMENDED DEFAULT: tshark emits a blank line on parse failure. Ingest bridge increments a "malformed_packets" counter and skips. After 100 consecutive malformed packets, the bridge logs ERROR and triggers a Grafana alert.`
 
@@ -1092,7 +1122,7 @@ Fields:
 |------|------|------|
 | Output format matches CONTRACT 8.4-A on sample PCAP | Integration | `tests/integration/test_tshark_format.sh` |
 | Line buffering produces output without delay | Integration | `tests/integration/test_tshark_buffering.sh` |
-| Malformed input handled | Unit | `services/sniffer-wrapper/tests/test_tshark_malformed.bats` |
+| Malformed input handled | Unit | `modules/bluetooth/sniffers/tests/test_tshark_malformed.bats` |
 
 **ACCEPTANCE CRITERIA:**
 1. Feeding `tests/fixtures/pcap/ubertooth-sample-001.pcap` via FIFO yields stdout output matching CONTRACT 8.4-A within 1 second.
@@ -1105,7 +1135,7 @@ Fields:
 mkfifo /tmp/test.fifo
 ./tools/pcap-replay.py tests/fixtures/pcap/ubertooth-sample-001.pcap /tmp/test.fifo &
 # Run tshark wrapper, compare to golden
-./services/sniffer-wrapper/tshark-wrap.sh test 2>/dev/null | head -10 > /tmp/actual.txt
+./modules/bluetooth/sniffers/tshark-wrap.sh test 2>/dev/null | head -10 > /tmp/actual.txt
 diff /tmp/actual.txt tests/fixtures/expected/tshark-ubertooth-sample-001.txt
 ```
 
@@ -1122,7 +1152,7 @@ diff /tmp/actual.txt tests/fixtures/expected/tshark-ubertooth-sample-001.txt
 **Module layout:**
 
 ```
-services/ingest-bridge/src/
+modules/bluetooth/ingest-bridge/src/
 ├── main.cpp           # Entry point, argument parsing, signal handling
 ├── config.{cpp,hpp}   # Reads BLESNIFF_* env vars
 ├── parser.{cpp,hpp}   # Tokenize CONTRACT 8.4-A lines into Packet structs
@@ -1217,14 +1247,14 @@ ingest_metrics sniffer_id=1 packets_in=12345 batches_flushed=67 malformed=2 last
 **VERIFICATION:**
 ```bash
 # Build
-cd services/ingest-bridge && cmake -B build && cmake --build build
+cd modules/bluetooth/ingest-bridge && cmake -B build && cmake --build build
 # Run unit tests
 ctest --test-dir build --output-on-failure
 # Integration
 ./tests/integration/test_ingest_e2e.sh
 # Throughput
 ./tools/pcap-replay.py tests/fixtures/pcap/large-sample.pcap.zst /tmp/test.fifo --rate=1500 &
-./services/ingest-bridge/build/blesniff-ingest --sniffer-id 99 --input /tmp/test.fifo &
+./modules/bluetooth/ingest-bridge/build/blesniff-ingest --sniffer-id 99 --input /tmp/test.fifo &
 sleep 60
 psql -t -c "SELECT COUNT(*) FROM raw_packets WHERE sniffer_id = 99 AND ts > NOW() - INTERVAL '1 minute';"
 # Expected: ~90000 rows (1500/s * 60s)
@@ -1241,7 +1271,7 @@ psql -t -c "SELECT COUNT(*) FROM raw_packets WHERE sniffer_id = 99 AND ts > NOW(
 **Module layout:**
 
 ```
-services/gap-detector/src/blesniff_gapdet/
+modules/bluetooth/gap-detector/src/blesniff_gapdet/
 ├── __init__.py
 ├── detector.py        # Find gaps
 ├── backfill.py        # Reprocess PCAP files
@@ -1286,7 +1316,7 @@ async def backfill_gap(
     """
 ```
 
-**DECISION REQUIRED 8.6.1:** Heartbeat source. `RECOMMENDED DEFAULT: sniffer_heartbeat table updated by the sniffer wrapper companion process every 30 seconds (see 8.1). Bucket is "running" if at least one heartbeat row exists within the bucket plus a 60-second grace at the edges.`
+**Heartbeat:** Local file primary, DB table secondary per D-11. See ADR-0001.
 
 **`ingest_gaps` table (to track backfill state):**
 
@@ -1338,7 +1368,7 @@ CREATE TABLE ingest_gaps (
 ./tests/integration/test_gap_detection.sh
 ```
 
-**Skill-set:** Python 3.12, asyncpg, pyshark, libpcap concepts, SQL, async patterns.
+**Skill-set:** Python 3.13, asyncpg, pyshark, libpcap concepts, SQL, async patterns.
 
 ---
 
@@ -1350,6 +1380,9 @@ CREATE TABLE ingest_gaps (
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS timescaledb;
+
+CREATE SCHEMA IF NOT EXISTS bluetooth;
+SET search_path TO bluetooth;
 
 CREATE TABLE IF NOT EXISTS _migrations (
     name TEXT PRIMARY KEY,
@@ -1391,9 +1424,10 @@ CREATE INDEX IF NOT EXISTS idx_raw_packets_mac_ts
     ON raw_packets (mac_address, ts DESC);
 CREATE INDEX IF NOT EXISTS idx_raw_packets_sniffer_ts
     ON raw_packets (sniffer_id, ts DESC);
--- Unique constraint enables ON CONFLICT DO NOTHING during backfill.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_raw_packets_dedup
-    ON raw_packets (sniffer_id, ts, mac_address);
+-- Dedup happens at query time via DISTINCT ON per D-10 resolution. No insert-time unique index.
+-- Performance index for time-range queries per sniffer (TimescaleDB hypertable auto-partitions by time).
+CREATE INDEX IF NOT EXISTS idx_raw_packets_lookup
+    ON raw_packets (sniffer_id, ts DESC);
 
 CREATE TABLE IF NOT EXISTS device_summary (
     mac_address      BYTEA       PRIMARY KEY,
@@ -1426,6 +1460,8 @@ CREATE TABLE IF NOT EXISTS ingest_gaps (
 
 INSERT INTO _migrations(name) VALUES ('0001_init') ON CONFLICT DO NOTHING;
 ```
+
+**Schema Isolation (Q5):** Tables for the v1 Bluetooth module live in a `bluetooth` schema under the `tianer` database. Future sensor modules (GPS, ADS-B, etc.) will use their own schemas. The `CREATE SCHEMA IF NOT EXISTS bluetooth` statement precedes all v1 table creation.
 
 **`0002_continuous_aggregates.sql`:**
 
@@ -1531,7 +1567,7 @@ INSERT INTO _migrations(name) VALUES ('0004_residency_classifier') ON CONFLICT D
 **Module layout:**
 
 ```
-services/deep-parser/src/
+modules/bluetooth/deep-parser/src/
 ├── main.cpp              # CLI: --in <pcap-or-zst> --out <jsonl-or-stdout>
 ├── pcap_input.{cpp,hpp}  # libpcap reader; transparent zstd via piped decompression
 ├── ble_dissector.{cpp,hpp}  # Link-layer + advertising PDU parsing
@@ -1610,7 +1646,7 @@ CREATE INDEX idx_device_enrichment_mac ON device_enrichment(mac_address, observe
 
 **VERIFICATION:**
 ```bash
-cd services/deep-parser && cmake -B build && cmake --build build && ctest --test-dir build --output-on-failure
+cd modules/bluetooth/deep-parser && cmake -B build && cmake --build build && ctest --test-dir build --output-on-failure
 ./build/blesniff-deep-parse --in ../../tests/fixtures/pcap/ubertooth-sample-001.pcap > /tmp/out.jsonl
 diff <(jq -S . /tmp/out.jsonl) <(jq -S . ../../tests/fixtures/expected/deep-parser-sample-001.jsonl)
 ```
@@ -1626,7 +1662,7 @@ diff <(jq -S . /tmp/out.jsonl) <(jq -S . ../../tests/fixtures/expected/deep-pars
 **Module layout:**
 
 ```
-services/ml-enrichment/src/blesniff_ml/
+modules/bluetooth/ml-enrichment/src/blesniff_ml/
 ├── classifier.py    # Rule-based + sklearn pipeline
 ├── clusterer.py     # RPA clustering (placeholder in v1)
 ├── features.py      # Feature extraction from JSONL
@@ -1648,7 +1684,7 @@ services/ml-enrichment/src/blesniff_ml/
 **Pipeline invocation:**
 
 ```bash
-ble-deep-parse --in /var/lib/blesniff/pcap/ut1/20260606-1200.pcap.zst \
+ble-deep-parse --in /var/lib/tianer/pcap/ut1/20260606-1200.pcap.zst \
   | python -m blesniff_ml.runner --sniffer-id 1
 ```
 
@@ -1665,7 +1701,7 @@ ble-deep-parse --in /var/lib/blesniff/pcap/ut1/20260606-1200.pcap.zst \
 1. Known-fixture JSONL produces expected `device_summary.enrichment_data.classes` values.
 2. Pipeline tolerates JSONL parse errors (logs, skips).
 
-**Skill-set:** Python 3.12, JSON streaming, BLE protocol knowledge, future: pandas + scikit-learn.
+**Skill-set:** Python 3.13, JSON streaming, BLE protocol knowledge, future: pandas + scikit-learn.
 
 ---
 
@@ -1676,7 +1712,7 @@ ble-deep-parse --in /var/lib/blesniff/pcap/ut1/20260606-1200.pcap.zst \
 **Module layout:**
 
 ```
-services/api/src/blesniff_api/
+platform/api/src/blesniff_api/
 ├── main.py            # FastAPI app, middleware, mount static
 ├── db.py              # asyncpg pool
 ├── auth.py            # API key middleware
@@ -1732,7 +1768,7 @@ class DeviceSummary(BaseModel):
 2. P95 endpoint latency under 200 ms for cached aggregates.
 3. Missing API key returns 401.
 
-**Skill-set:** Python 3.12, FastAPI, asyncpg, Pydantic v2, async testing.
+**Skill-set:** Python 3.13, FastAPI, asyncpg, Pydantic v2, async testing.
 
 ---
 
@@ -1806,13 +1842,13 @@ datasources:
   - name: TimescaleDB
     type: postgres
     url: 127.0.0.1:5432
-    database: blesniff
-    user: blesniff_grafana
+    database: tianer
+    user: tianer_grafana
     secureJsonData:
-      password: $__file{/etc/blesniff/secrets/grafana_db_password}
+      password: $__file{/etc/tianer/secrets/grafana_db_password}
     jsonData:
       sslmode: disable
-      postgresVersion: 1600
+      postgresVersion: 1700
       timescaledb: true
     isDefault: true
 ```
@@ -1861,7 +1897,7 @@ Quick reference of every contract referenced by ID elsewhere in the document.
 
 | Level | Scope | Tools | Where it lives | When it runs |
 |-------|-------|-------|----------------|--------------|
-| Unit | Single function or class, no I/O | GoogleTest (C++), pytest (Python), Vitest (TS), bats (bash) | `services/*/tests/`, `frontend/tests/` | Every commit (pre-commit + CI) |
+| Unit | Single function or class, no I/O | GoogleTest (C++), pytest (Python), Vitest (TS), bats (bash) | `modules/*/tests/`, `platform/*/tests/` | Every commit (pre-commit + CI) |
 | Integration | Two or more components with real DB/files | shell scripts driving compiled binaries | `tests/integration/` | CI on push to main and PR |
 | End-to-end | Full pipeline on the Pi (or Pi-like container) | `tests/e2e/smoke.sh` | Pi smoke target | Manual + nightly on Pi |
 | Performance | Throughput and latency benchmarks | custom scripts | `tests/perf/` | Manual + weekly on Pi |
@@ -1894,7 +1930,7 @@ Quick reference of every contract referenced by ID elsewhere in the document.
 
 * `db/tests/` contains pgTAP-style SQL files (or simpler `psql` scripts).
 * Each test runs in a transaction that rolls back at the end.
-* The integration test harness spins up a separate test database `blesniff_test` per run.
+* The integration test harness spins up a separate test database `tianer_test` per run.
 * Seed data from `tests/fixtures/sql/seed_*.sql`.
 
 ### 10.4 Mocking Real Sniffers
@@ -1922,11 +1958,11 @@ Sequential phases. Any failure stops the run.
 
 1. `pre-commit run --all-files` (formatting, lint, basic checks).
 2. C++ unit tests: `cmake -B build && ctest --test-dir build`.
-3. Python unit tests: `uv run pytest services/*/tests/`.
-4. TypeScript unit tests: `cd frontend && npm test`.
+3. Python unit tests: `uv run pytest modules/*/tests/ platform/*/tests/`.
+4. TypeScript unit tests: `cd platform/frontend && npm test`.
 5. SQL migrations smoke: apply all migrations to a fresh DB.
 6. Integration tests: `tests/integration/*.sh` against a docker-compose stack.
-7. Frontend build: `cd frontend && npm run build`.
+7. Frontend build: `cd platform/frontend && npm run build`.
 8. Container build (optional, for distribution).
 
 ---
@@ -2006,7 +2042,7 @@ Metrics catalogue:
 * External access via the Pi's existing WireGuard tunnel (out of scope for this project to configure).
 * API key required for `/api/*`. Generated on first deploy.
 * PostgreSQL accepts only local connections (Unix socket and 127.0.0.1).
-* No sudoers entries created for the `blesniff` user.
+* No sudoers entries created for the `tianer` user.
 
 ### 12.5 Service Orchestration
 
@@ -2024,7 +2060,7 @@ All services run under systemd. Key units:
 
 Dependency chain per sniffer: `postgresql -> blesniff-tshark@<n> -> blesniff-ingest@<n> -> blesniff-sniffer@<n>` (ingest must be ready to read tshark's stdout, tshark must be ready to read the FIFO before sniffer writes).
 
-`RECOMMENDED DEFAULT for DECISION 6.1 (systemd vs Docker):` systemd. USB device access is simpler.
+RESOLVED by Q1: all components now run in rootless Podman containers managed by Quadlet. USB devices are passed through from the host. See component-breakdown.md §2.1a for the container-pod architecture.
 
 ---
 
@@ -2057,16 +2093,16 @@ The root `Makefile` is the agent's entry point.
 
 Idempotent. Safe to run multiple times. Phases:
 
-1. Verify OS (`/etc/os-release` matches Raspberry Pi OS Bookworm or compatible).
-2. Create `blesniff` user and group if missing.
+1. Verify OS (`/etc/os-release` matches Raspberry Pi OS Trixie or compatible).
+2. Create `tianer` user and group if missing.
 3. Install apt packages from `deploy/apt-packages.txt` (idempotent via `apt-get install`).
-4. Install PostgreSQL 16 + TimescaleDB extension (via official TimescaleDB apt repo).
+4. Install PostgreSQL 17 + TimescaleDB extension (via official TimescaleDB apt repo).
 5. Install Grafana (via official apt repo).
-6. Install Node.js 20 (via NodeSource).
-7. Install Python 3.12 (default on Bookworm) + uv.
+6. Install Node.js 24 LTS (via NodeSource).
+7. Install Python 3.13 (default on Trixie) + uv.
 8. Install Ubertooth tools (build from source; `deploy/scripts/install-ubertooth.sh`).
 9. Install nrfutil (download official ARM64 binary).
-10. Create directory tree (`/etc/blesniff/`, `/var/lib/blesniff/`, `/var/log/blesniff/`, `/var/run/blesniff/`).
+10. Create directory tree (`/etc/tianer/`, `/var/lib/tianer/`, `/var/log/tianer/`, `/var/run/tianer/`).
 11. Install udev rules.
 12. Install systemd unit files.
 13. Reload systemd, enable timers, do NOT start sniffers yet (operator must verify config).
@@ -2078,21 +2114,21 @@ Idempotent. Safe to run multiple times. Phases:
 
 | Component | Built where | Installed to |
 |-----------|------------|--------------|
-| ingest-bridge | `services/ingest-bridge/build/blesniff-ingest` | `/usr/local/bin/blesniff-ingest` |
-| deep-parser | `services/deep-parser/build/blesniff-deep-parse` | `/usr/local/bin/blesniff-deep-parse` |
-| sniffer-wrapper | `services/sniffer-wrapper/*.sh` | `/usr/local/lib/blesniff/wrap/` |
-| gap-detector | Python venv | `/opt/blesniff/gap-detector/` |
-| ml-enrichment | Python venv | `/opt/blesniff/ml-enrichment/` |
-| api | Python venv | `/opt/blesniff/api/` |
-| frontend | `frontend/dist/` | `/usr/share/blesniff/frontend/` |
-| db migrations | `db/migrations/*.sql` | `/usr/share/blesniff/migrations/` |
+| ingest-bridge | `modules/bluetooth/ingest-bridge/build/blesniff-ingest` | `/usr/local/bin/blesniff-ingest` |
+| deep-parser | `modules/bluetooth/deep-parser/build/blesniff-deep-parse` | `/usr/local/bin/blesniff-deep-parse` |
+| sniffer-wrapper | `modules/bluetooth/sniffers/*.sh` | `/usr/local/lib/tianer/wrap/` |
+| gap-detector | Python venv | `/opt/tianer/gap-detector/` |
+| ml-enrichment | Python venv | `/opt/tianer/ml-enrichment/` |
+| api | Python venv | `/opt/tianer/api/` |
+| frontend | `platform/frontend/dist/` | `/usr/share/tianer/frontend/` |
+| db migrations | `db/migrations/*.sql` | `/usr/share/tianer/migrations/` |
 | systemd units | `deploy/systemd/*.service` | `/etc/systemd/system/` |
 
 ### 13.4 Adding a New Sniffer
 
 Procedure (also in `docs/runbooks/add-new-sniffer.md`):
 
-1. Edit `/etc/blesniff/sniffers.yaml` to add the new sniffer block.
+1. Edit `/etc/tianer/sniffers.yaml` to add the new sniffer block.
 2. Run `make services-restart` (which validates the YAML and starts new per-sniffer units).
 3. Verify via `make services-status` and `curl -H "X-API-Key: $KEY" http://127.0.0.1:8080/api/health`.
 
@@ -2116,15 +2152,15 @@ for unit in postgresql grafana-server blesniff-api blesniff-rotate.timer blesnif
 done
 
 step "2. Verify DB schema"
-psql -U blesniff -d blesniff -t -c "SELECT COUNT(*) FROM _migrations;" | grep -q '[1-9]' || exit 1
+psql -U tianer -d tianer -t -c "SELECT COUNT(*) FROM _migrations;" | grep -q '[1-9]' || exit 1
 
 step "3. Verify API health endpoint"
-api_key=$(cat /etc/blesniff/secrets/api_key)
+api_key=$(cat /etc/tianer/secrets/api_key)
 curl -sf -H "X-API-Key: $api_key" http://127.0.0.1:8080/api/health | jq -e '.status == "ok"'
 
 step "4. Inject synthetic packets via mock-sniffer and verify they land in DB"
 sniffer_id=99
-psql -U blesniff -d blesniff -c \
+psql -U tianer -d tianer -c \
   "INSERT INTO sniffers (sniffer_id, name, type, enabled) VALUES ($sniffer_id, 'mock99', 'mock', false)
    ON CONFLICT DO NOTHING;"
 
@@ -2135,13 +2171,13 @@ sleep 8
 kill $INGEST_PID 2>/dev/null || true
 wait $INGEST_PID 2>/dev/null || true
 
-count=$(psql -U blesniff -d blesniff -t -c \
+count=$(psql -U tianer -d tianer -t -c \
   "SELECT COUNT(*) FROM raw_packets WHERE sniffer_id = $sniffer_id AND ts > NOW() - INTERVAL '1 minute';")
 [[ $count -ge 450 ]] || { echo "FAIL: only $count rows ingested (expected ~500)"; exit 1; }
 
 step "5. Verify continuous aggregate populated"
 sleep 70
-agg_count=$(psql -U blesniff -d blesniff -t -c \
+agg_count=$(psql -U tianer -d tianer -t -c \
   "SELECT COUNT(*) FROM device_5min_buckets WHERE bucket > NOW() - INTERVAL '15 minutes';")
 [[ $agg_count -gt 0 ]] || { echo "FAIL: continuous aggregate empty"; exit 1; }
 
@@ -2163,8 +2199,8 @@ curl -sf http://127.0.0.1:3000/api/health | jq -e '.database == "ok"'
 curl -sf "http://127.0.0.1:3000/api/search?type=dash-db" | jq -e 'length >= 4'
 
 step "10. Cleanup mock data"
-psql -U blesniff -d blesniff -c "DELETE FROM raw_packets WHERE sniffer_id = $sniffer_id;"
-psql -U blesniff -d blesniff -c "DELETE FROM sniffers WHERE sniffer_id = $sniffer_id;"
+psql -U tianer -d tianer -c "DELETE FROM raw_packets WHERE sniffer_id = $sniffer_id;"
+psql -U tianer -d tianer -c "DELETE FROM sniffers WHERE sniffer_id = $sniffer_id;"
 
 echo
 echo "SMOKE TEST PASSED"
@@ -2212,11 +2248,11 @@ Tasks are dependency-ordered. Each task is a unit of work that produces a verifi
 **Deliverables:**
 Per section 6 in full:
 * `deploy/setup.sh` orchestrates the entire bootstrap.
-* `deploy/scripts/create-user.sh` (section 6.1): creates the `blesniff` system user, adds it to `plugdev`, `dialout`, and `wireshark` groups via `usermod -aG`.
+* `deploy/scripts/create-user.sh` (section 6.1): creates the `tianer` system user, adds it to `plugdev`, `dialout`, and `wireshark` groups via `usermod -aG`.
 * `deploy/scripts/setup-wireshark.sh` (section 6.3): installs tshark and configures `dumpcap` capabilities via `dpkg-reconfigure wireshark-common`.
-* `deploy/scripts/create-dirs.sh` (section 6.4): creates `/var/lib/blesniff`, `/etc/blesniff`, etc., with correct ownership and mode.
-* `deploy/udev/99-blesniff.rules` (section 6.2): grants device access via the `plugdev` group with `MODE=0660`.
-* `/etc/tmpfiles.d/blesniff.conf`: declares FIFOs and runtime directories.
+* `deploy/scripts/create-dirs.sh` (section 6.4): creates `/var/lib/tianer`, `/etc/tianer`, etc., with correct ownership and mode.
+* `deploy/udev/99-tianer.rules` (section 6.2): grants device access via the `plugdev` group with `MODE=0660`.
+* `/etc/tmpfiles.d/tianer.conf`: declares FIFOs and runtime directories.
 * `deploy/apt-packages.txt`: every apt dependency listed.
 * `tests/integration/test_prereqs.sh` (section 6.9): end-to-end prereq verification.
 
@@ -2224,12 +2260,12 @@ Per section 6 in full:
 1. Running `sudo deploy/setup.sh` on a fresh host completes without error.
 2. Re-running the same script produces no changes (idempotency).
 3. `tests/integration/test_prereqs.sh` exits 0.
-4. The `blesniff` user can perform all platform operations without `sudo`:
-   * Read Ubertooth device (`sudo -u blesniff ubertooth-util -v`).
+4. The `tianer` user can perform all platform operations without `sudo`:
+   * Read Ubertooth device (`sudo -u tianer ubertooth-util -v`).
    * Read nRF serial port.
    * Invoke `dumpcap` / `tshark` for capture.
    * Connect to PostgreSQL.
-5. No sudoers entries exist (`ls /etc/sudoers.d/blesniff*` returns nothing).
+5. No sudoers entries exist (`ls /etc/sudoers.d/tianer*` returns nothing).
 
 **Verification:**
 ```bash
@@ -2247,16 +2283,16 @@ tests/integration/test_prereqs.sh
 **Effort:** M.
 
 **Inputs:**
-* PostgreSQL 16 and TimescaleDB packages available.
+* PostgreSQL 17 and TimescaleDB packages available.
 
 **Deliverables:**
-* PostgreSQL 16 running with TimescaleDB extension enabled.
+* PostgreSQL 17 running with TimescaleDB extension enabled.
 * `db/migrations/0001_init.sql` through `0004_residency_classifier.sql` applied.
 * `db/apply-migrations.sh` script that is idempotent.
 * `make db-up` works.
 
 **Acceptance Criteria:**
-1. `psql -U blesniff -d blesniff -c "SELECT default_version FROM pg_available_extensions WHERE name='timescaledb';"` shows >= 2.16.
+1. `psql -U tianer -d tianer -c "SELECT default_version FROM pg_available_extensions WHERE name='timescaledb';"` shows >= 2.16.
 2. `\d raw_packets` shows the hypertable with expected columns.
 3. `SELECT * FROM _migrations;` lists all four migrations.
 4. Inserting a row into `raw_packets` and querying via the continuous aggregate (after refresh) returns it.
@@ -2265,7 +2301,7 @@ tests/integration/test_prereqs.sh
 ```bash
 make db-up
 make db-up  # idempotent re-run
-psql -U blesniff -d blesniff -f db/tests/test_schema.sql
+psql -U tianer -d tianer -f db/tests/test_schema.sql
 ```
 
 ---
@@ -2309,14 +2345,14 @@ tshark -r /tmp/test.pcap -c 5
 
 **Acceptance Criteria:**
 1. `nrfutil --version` succeeds.
-2. `nrfutil ble-sniffer sniff --port /dev/blesniff/nrf0 --output-pcap-file /tmp/nrf.pcap` runs for 30s and produces a valid PCAP.
+2. `nrfutil ble-sniffer sniff --port /dev/tianer/nrf0 --output-pcap-file /tmp/nrf.pcap` runs for 30s and produces a valid PCAP.
 
 **DECISION 5.1.2 Resolution:** If `nrfutil ble-sniffer` is not available for ARM64, fall back to the Python script from the Nordic SDK and document the alternative path in `docs/runbooks/nrf-fallback.md`.
 
 **Verification:**
 ```bash
 nrfutil --version
-timeout 30 nrfutil ble-sniffer sniff --port /dev/blesniff/nrf0 --output-pcap-file /tmp/nrf.pcap || true
+timeout 30 nrfutil ble-sniffer sniff --port /dev/tianer/nrf0 --output-pcap-file /tmp/nrf.pcap || true
 tshark -r /tmp/nrf.pcap -c 5
 ```
 
@@ -2329,9 +2365,9 @@ tshark -r /tmp/nrf.pcap -c 5
 **Effort:** M.
 
 **Deliverables:**
-* `services/sniffer-wrapper/ubertooth-wrap.sh`, `nrf-wrap.sh`.
-* `services/sniffer-wrapper/tshark-wrap.sh` (per CONTRACT 8.4-A).
-* `services/sniffer-wrapper/heartbeat.sh` (companion process).
+* `modules/bluetooth/sniffers/ubertooth-wrap.sh`, `nrf-wrap.sh`.
+* `modules/bluetooth/sniffers/tshark-wrap.sh` (per CONTRACT 8.4-A).
+* `modules/bluetooth/sniffers/heartbeat.sh` (companion process).
 * systemd templates `blesniff-sniffer@.service` and `blesniff-tshark@.service`.
 * bats tests for the wrappers.
 
@@ -2339,7 +2375,7 @@ tshark -r /tmp/nrf.pcap -c 5
 
 **Verification:**
 ```bash
-bats services/sniffer-wrapper/tests/
+bats modules/bluetooth/sniffers/tests/
 ./tests/integration/test_dual_write.sh
 ./tests/integration/test_tshark_format.sh
 ```
@@ -2386,7 +2422,7 @@ bats services/sniffer-wrapper/tests/
 ```bash
 tshark -G fields | grep -E 'btle|nordic_ble' > /tmp/all-fields.txt
 # Manually verify the fields in tshark-wrap.sh appear in /tmp/all-fields.txt
-diff <(./services/sniffer-wrapper/tshark-wrap.sh test < tests/fixtures/pcap/ubertooth-sample-001.pcap | head -20) \
+diff <(./modules/bluetooth/sniffers/tshark-wrap.sh test < tests/fixtures/pcap/ubertooth-sample-001.pcap | head -20) \
      tests/fixtures/expected/tshark-ubertooth-sample-001.txt
 ```
 
@@ -2399,7 +2435,7 @@ diff <(./services/sniffer-wrapper/tshark-wrap.sh test < tests/fixtures/pcap/uber
 **Effort:** L.
 
 **Deliverables:**
-* `services/ingest-bridge/` complete with `CMakeLists.txt`, sources, GoogleTest tests.
+* `modules/bluetooth/ingest-bridge/` complete with `CMakeLists.txt`, sources, GoogleTest tests.
 * Binary installed to `/usr/local/bin/blesniff-ingest`.
 * systemd template `blesniff-ingest@.service`.
 
@@ -2407,7 +2443,7 @@ diff <(./services/sniffer-wrapper/tshark-wrap.sh test < tests/fixtures/pcap/uber
 
 **Verification:**
 ```bash
-cd services/ingest-bridge && cmake -B build && cmake --build build && ctest --test-dir build --output-on-failure
+cd modules/bluetooth/ingest-bridge && cmake -B build && cmake --build build && ctest --test-dir build --output-on-failure
 ./tests/integration/test_ingest_e2e.sh
 ./tests/integration/test_pg_reconnect.sh
 ./tests/integration/test_ingest_throughput.sh  # >= 1500 packets/sec
@@ -2417,12 +2453,12 @@ cd services/ingest-bridge && cmake -B build && cmake --build build && ctest --te
 
 ### T09: Gap Detector (Python)
 
-**Skill-set:** Python 3.12, asyncpg, pyshark, SQL, async.
+**Skill-set:** Python 3.13, asyncpg, pyshark, SQL, async.
 **Depends on:** T06, T08.
 **Effort:** L.
 
 **Deliverables:**
-* `services/gap-detector/` Python package.
+* `modules/bluetooth/gap-detector/` Python package.
 * Binary entry point `blesniff-gap-detect`.
 * `blesniff-gap-detector.service` + `.timer`.
 
@@ -2430,7 +2466,7 @@ cd services/ingest-bridge && cmake -B build && cmake --build build && ctest --te
 
 **Verification:**
 ```bash
-cd services/gap-detector && uv run pytest
+cd modules/bluetooth/gap-detector && uv run pytest
 ./tests/integration/test_gap_detection.sh
 ./tests/integration/test_backfill_idempotent.sh
 ```
@@ -2506,7 +2542,7 @@ psql -c "SELECT residency_class, COUNT(*) FROM device_summary GROUP BY residency
 **Effort:** L.
 
 **Deliverables:**
-* `services/deep-parser/` complete.
+* `modules/bluetooth/deep-parser/` complete.
 * Binary `/usr/local/bin/blesniff-deep-parse`.
 * Golden fixture `tests/fixtures/expected/deep-parser-sample-001.jsonl`.
 
@@ -2514,7 +2550,7 @@ psql -c "SELECT residency_class, COUNT(*) FROM device_summary GROUP BY residency
 
 **Verification:**
 ```bash
-cd services/deep-parser && cmake -B build && cmake --build build && ctest --test-dir build --output-on-failure
+cd modules/bluetooth/deep-parser && cmake -B build && cmake --build build && ctest --test-dir build --output-on-failure
 ./tests/integration/test_deep_parser_golden.sh
 ```
 
@@ -2527,14 +2563,14 @@ cd services/deep-parser && cmake -B build && cmake --build build && ctest --test
 **Effort:** M.
 
 **Deliverables:**
-* `services/ml-enrichment/` package.
+* `modules/bluetooth/ml-enrichment/` package.
 * Rule-based classifier per section 8.9.
 
 **Acceptance Criteria:** As in section 8.9.
 
 **Verification:**
 ```bash
-cd services/ml-enrichment && uv run pytest
+cd modules/bluetooth/ml-enrichment && uv run pytest
 ./tests/integration/test_ml_e2e.sh
 ```
 
@@ -2547,7 +2583,7 @@ cd services/ml-enrichment && uv run pytest
 **Effort:** L.
 
 **Deliverables:**
-* `services/api/` package.
+* `platform/api/` package.
 * All endpoints per CONTRACT 8.10-A.
 * OpenAPI schema at `/docs`.
 * `blesniff-api.service` systemd unit.
@@ -2556,7 +2592,7 @@ cd services/ml-enrichment && uv run pytest
 
 **Verification:**
 ```bash
-cd services/api && uv run pytest
+cd platform/api && uv run pytest
 ./tests/integration/test_api_endpoints.sh
 curl -sf http://127.0.0.1:8080/openapi.json | jq -e '.paths | keys | length >= 8'
 ```
@@ -2581,7 +2617,7 @@ curl -sf http://127.0.0.1:8080/openapi.json | jq -e '.paths | keys | length >= 8
 
 **Verification:**
 ```bash
-cd frontend && npm install && npm test && npm run build
+cd platform/frontend && npm install && npm test && npm run build
 ```
 
 ---
@@ -2681,7 +2717,7 @@ curl -sf http://127.0.0.1:8080/metrics | grep blesniff_packets_ingested_total
 
 **Deliverables:**
 * `deploy/scripts/backup.sh` running `pg_basebackup` nightly.
-* `blesniff-backup.service` + `.timer`.
+* `tianer-backup.service` + `.timer`.
 
 **Acceptance Criteria:**
 1. Backup runs nightly and produces a tarball at the configured destination.
@@ -2712,7 +2748,7 @@ curl -sf http://127.0.0.1:8080/metrics | grep blesniff_packets_ingested_total
 ```bash
 nmap -sT 127.0.0.1
 curl -sf -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/devices  # expect 401
-curl -sf -H "X-API-Key: $(cat /etc/blesniff/secrets/api_key)" http://127.0.0.1:8080/api/devices  # expect 200
+curl -sf -H "X-API-Key: $(cat /etc/tianer/secrets/api_key)" http://127.0.0.1:8080/api/devices  # expect 200
 ```
 
 ---
@@ -2739,7 +2775,7 @@ make test-e2e
 
 | ID | Topic | Recommended Default | Section |
 |----|-------|---------------------|---------|
-| 3.1 | OS version | Raspberry Pi OS 64-bit Bookworm | 3 |
+| 3.1 | OS version | Raspberry Pi OS 64-bit Trixie | 3 |
 | 3.2 | USB port pinning | udev rules with vendor:product + port path | 3 |
 | 5.1.2 | nrfutil ARM64 availability | Use binary if available; document Python fallback | 8.1 |
 | 8.1.1 | Sniffer stdout PCAP support | Validate during T03/T04 | 8.1 |
@@ -2761,7 +2797,7 @@ make test-e2e
 | 8.11.2 | Grafana embedding | iframe, anonymous LAN-only | 8.11 |
 | 11.1.1 | PCAP fixture source | Capture during T03/T04, anonymize | 11.1 |
 | 12.3.1 | Backup destination | External USB if present; else skip | 12.3 |
-| 6.1 (legacy) | systemd vs Docker | systemd | 12.5 |
+| 6.1 (legacy) | Deployment model | Rootless Podman + Quadlet (resolved by Q1) | 12.5 |
 
 **Decision resolution protocol:** When an agent implements a default, they must:
 1. Add a code comment with the decision ID at the implementation site.
@@ -2865,7 +2901,7 @@ References use a Vancouver-style numeric citation format. All URLs were verified
 
 [^ts-install]: Timescale Inc. "Upgrade PostgreSQL with TimescaleDB: PostgreSQL 15 support deprecated, removal June 2026; recommended PG 16+." Tiger Data Documentation. https://www.tigerdata.com/docs/deploy/self-hosted/upgrades/upgrade-pg
 
-[^py3143]: Python Software Foundation. "The Latest Version of Python: Python 3.14.3, released February 3, 2026." phoenixNAP Knowledge Base. https://phoenixnap.com/kb/latest-python-version
+[^py3143]: Python Software Foundation. "The Latest Version of Python: Python 3.13.12, released February 3, 2026." phoenixNAP Knowledge Base. https://phoenixnap.com/kb/latest-python-version
 
 [^py31312]: Python Software Foundation. "Python Release Python 3.13.12." Python.org. February 3, 2026. https://www.python.org/downloads/release/python-31312/
 

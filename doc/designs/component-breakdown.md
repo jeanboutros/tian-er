@@ -60,6 +60,24 @@ The platform is decomposed into 14 components organized by responsibility domain
 | C13 | Observability | Prometheus format / structured logs | §12.1, §12.2 | Metrics exposition, structured logging, health endpoints |
 | C14 | Deployment Automation | Bash / Makefile | §13.1, §13.2 | `setup.sh`, build targets, install paths, rollback |
 
+### 2.1a Container Orchestration (Q1 Resolution)
+
+All components run in Podman containers managed by Quadlet. USB devices are passed through from the host using persistent udev symlinks (Q4). The deployment model uses **rootless Podman** with `--group-add keep-groups` for the `tianer` user. See `doc/designs/storage-strategy.md` for the full volume inventory, per-container access matrix, and Quadlet unit file specifications.
+
+**Container-Pod Architecture:**
+- **tianer-capture pod** (Network=none): sniffer + tshark containers, one instance per sniffer
+- **tianer-platform pod** (bridge): ingest, gap detector, deep parser, ML, API, heartbeat
+- **Standalone:** PostgreSQL (tianer-postgres), Grafana (tianer-grafana)
+
+**Security model** per `docs/project-management/reviews/TIANER-001-container-security-recommendation.md`:
+- Zero `--privileged` containers
+- `--cap-drop ALL` default; C03 only: `CAP_NET_RAW` + `CAP_NET_ADMIN`
+- Digest-pinned images (`@sha256:`); no `:latest` tags
+- Config volume (`/etc/tianer/`) mounted `:ro` everywhere
+- PCAP volume mounted `:ro` for gap detector and deep parser
+
+**Container image policy:** All container images must be built from minimal base images (Debian `slim` variant, Alpine, or distroless as appropriate per toolchain). Images must include only the libraries and tools required to run the component — no shells, package managers, or development headers in runtime images. Multi-stage builds are mandatory: the build stage may include compilers and dev headers; the runtime stage copies only the compiled artifact and its runtime dependencies. Target: each runtime image under 200 MB uncompressed, boot-to-ready under 3 seconds on a Raspberry Pi CM5.
+
 ### 2.2 Component Categories
 
 **Shared Platform (built once, inherited by all modules):**
@@ -422,8 +440,11 @@ Every component design document MUST contain the following sections. This is the
 | **9. Configuration** | Environment variables, config files, defaults, tuning parameters | All |
 | **10. Test Plan** | Unit tests, integration tests, performance tests, acceptance criteria | All |
 | **11. Deployment Notes** | Build steps, install paths, systemd units, dependencies | All |
+| **12. Container Integration** | Quadlet unit verification, volume mount correctness, pod networking | C01, C12, C14 |
 
 ### 5.2 Per-Component Artifact Details
+
+**Container Storage (Q11):** Each component design document must reference the volume inventory from `doc/designs/storage-strategy.md` and specify which volumes it mounts, with what access mode (`:ro` or `:rw`). The per-component artifact lists below have been updated with the relevant storage volumes.
 
 #### C01 — Platform Infrastructure
 
@@ -435,6 +456,7 @@ Every component design document MUST contain the following sections. This is the
 | Data Model | User/group/capability matrix |
 | Failure Modes | USB disconnect, disk full, thermal throttle, power loss |
 | Security | Disk encryption decision, physical security, sudo policy |
+| Storage | Host directory bootstrap (V01-V05), tmpfiles.d config, tianer user with correct groups |
 
 #### C02 — Database
 
@@ -442,10 +464,13 @@ Every component design document MUST contain the following sections. This is the
 |----------|-------------|
 | HLA | PostgreSQL/TimescaleDB architecture, role hierarchy |
 | **ERD** | Full entity-relationship diagram: `sniffers`, `sniffer_heartbeat`, `raw_packets` (hypertable), `device_summary`, `device_enrichment`, `ingest_gaps`, `_migrations` |
+| ERD | `bluetooth` schema isolation — v1 tables under `bluetooth` schema, future modules under their own schemas |
+| ERD | `raw_packets` unique constraint: query-time dedup via `DISTINCT ON (sniffer_id, ts, mac_address, pdu_type)` — no unique index at insert time. Dedup at query time not insert time per D-05/D-10. |
 | ERD | Continuous aggregate dependency graph |
 | LLA | Migration numbering and application protocol |
 | Failure Modes | DB connection loss, corrupt hypertable, migration failure rollback |
 | Observability | Table sizes, query performance, replication lag |
+| Storage | V06 (tianer-postgres-data Podman volume), secrets via EnvironmentFile |
 
 #### C03 — Capture Pipeline
 
@@ -455,10 +480,13 @@ Every component design document MUST contain the following sections. This is the
 | HLA | Per-sniffer-type DLT and tshark field configuration |
 | **Contract** `CAPTURE-1` | Sniffer wrapper → FIFO (PCAP binary format, DLT per sniffer type) |
 | **Contract** `CAPTURE-2` | tshark output → ingest bridge (replaces CONTRACT 8.4-A, parameterized per DLT) |
-| **Contract** `CAPTURE-3` | Heartbeat protocol (write interval, schema, fallback on DB outage) |
+| Contract Note | CAPTURE-2 produces a **normalized** pipe-delimited output regardless of source DLT. The per-DLT parameterization in `tshark-wrap.sh` ensures the ingest bridge receives a consistent schema. |
+| **Contract** `CAPTURE-3` | Heartbeat protocol: local file primary (`/var/lib/tianer/heartbeat/<sniffer_name>.ts`), DB table secondary (`sniffer_heartbeat`). On DB outage, local file persists; on recovery, DB is backfilled from local file. |
+| Configuration | Channel strategy: configurable per sniffer in `sniffers.yaml`; default channel 37; operator changes via config reload |
 | Failure Modes | FIFO reader death, sniffer crash, DLT mismatch, backpressure cascade |
 | Security | Shell injection via config values, USB device access |
 | **BLE Protocol Notes** | Single-channel limitation, channel selection strategy, dewhitening status, CRC verification |
+| Storage | V02 (:rw for PCAP), V03 (:rw for FIFOs), USB device passthrough, V08 (capture pod tmpfs) |
 
 #### C04 — PCAP Rotation
 
@@ -468,6 +496,7 @@ Every component design document MUST contain the following sections. This is the
 | **Contract** `ROTATION-1` | PCAP filename convention (YYYYMMDD-HHMM.pcap / .pcap.zst) |
 | Failure Modes | Rotation during write (SIGHUP race), disk full, compression failure |
 | Security | PCAP data sensitivity (contains BLE MACs) |
+| Storage | V02 (:rw for rotation/compression) |
 
 #### C05 — Ingest Bridge
 
@@ -475,13 +504,15 @@ Every component design document MUST contain the following sections. This is the
 |----------|-------------|
 | HLA | Parser → Batcher → PgWriter pipeline |
 | **ERD** | `Packet` struct ↔ `raw_packets` row mapping |
-| LLA | `parse_line()` state machine, Batcher flush policy, PgWriter reconnection logic |
+| LLA | Batcher flush policy: max 300K rows (~60MB RAM per sniffer instance) or 5-minute timeout, whichever first. This covers 5 minutes of DB downtime at 1000 pps. |
+| LLA | `parse_line()` state machine, PgWriter reconnection logic |
 | LLA | Write-ahead log / checkpoint for crash recovery |
 | **Contract** `INGEST-1` | tshark field input schema (replaces CONTRACT 8.5-A) |
 | **Contract** `INGEST-2` | Ingest bridge → PostgreSQL COPY protocol |
 | Failure Modes | PG outage (buffer sizing + recovery), malformed input, OOM kill, partial batch loss |
 | Observability | `blesniff_packets_ingested_total`, `blesniff_ingest_latency_seconds`, `blesniff_malformed_packets_total`, buffer depth gauge |
 | Security | Input validation ranges, field length limits |
+| Storage | V03 (:rw for ingest FIFO read) |
 
 #### C06 — Gap Detector
 
@@ -495,6 +526,7 @@ Every component design document MUST contain the following sections. This is the
 | Failure Modes | Missing PCAP, corrupted PCAP, heartbeat false negative, backfill INSERT failure |
 | Observability | `blesniff_gap_detected_total`, `blesniff_backfill_rows_total` |
 | **Secondary verification** | Periodic PCAP row count vs DB row count comparison |
+| Storage | V02 (:ro for backfill PCAP reads) |
 
 #### C07 — Deep Parser
 
@@ -506,7 +538,9 @@ Every component design document MUST contain the following sections. This is the
 | **Contract** `DEEP-1` | JSONL output schema (replaces CONTRACT 8.8-A) |
 | Failure Modes | Corrupted PCAP, malformed PDU, decompression failure, output I/O failure |
 | Security | PCAP input validation, memory bounds (100MB limit) |
-| **BLE Protocol Notes** | DLT type expected, dewhitened data assumption, CRC already verified |
+| **BLE Protocol** | DLT type expected, dewhitened data assumption |
+| **BLE Protocol** | CRC-24 validation: configurable validation step (default: enabled). When disabled, bypass validation for sniffer sources known to pre-verify CRC (e.g., Ubertooth One firmware). Validation failure increments `blesniff_crc_errors_total` metric. |
+| Storage | V02 (:ro for PCAP source), V05 (:rw for JSONL output) |
 
 #### C08 — ML Enrichment
 
@@ -517,6 +551,7 @@ Every component design document MUST contain the following sections. This is the
 | Data Model | `device_summary.enrichment_data` JSONB schema |
 | Failure Modes | JSONL parse error, DB write failure, unknown manufacturer |
 | **Contract** `ML-1` | Deep parser JSONL → ML enrichment input (required vs optional fields) |
+| Storage | V05 (:ro for JSONL input) |
 
 #### C09 — REST API
 
@@ -529,6 +564,7 @@ Every component design document MUST contain the following sections. This is the
 | Failure Modes | DB down, slow queries, auth failure |
 | Security | Parameterized queries mandate, TLS requirement, rate limiting, API key rotation |
 | Observability | Request latency histogram, error rate, active connections |
+| Storage | V01 (:ro for TLS certs), frontend static files embedded in image |
 
 #### C10 — Frontend
 
@@ -539,6 +575,7 @@ Every component design document MUST contain the following sections. This is the
 | Failure Modes | API unreachable, stale data, auth failure |
 | Security | API key stored where? (never in client-side code) |
 | Observability | Error boundary reporting, loading states |
+| Storage | None — served from API container image |
 
 #### C11 — Grafana Dashboards
 
@@ -548,6 +585,7 @@ Every component design document MUST contain the following sections. This is the
 | LLA | Per-dashboard SQL queries, panel layout |
 | Failure Modes | Datasource down, query timeout, provisioning failure |
 | Security | Bind address, anonymous access scope |
+| Storage | V07 (grafana-data Podman volume) |
 
 #### C12 — Service Orchestration
 
@@ -557,6 +595,7 @@ Every component design document MUST contain the following sections. This is the
 | LLA | Per-service ExecStart/Stop, ordering, sandboxing |
 | Failure Modes | Circular dependency, service crash loop, ordering violation |
 | Security | Per-service ReadWritePaths, NoNewPrivileges, SystemCallFilter |
+| Storage | Quadlet unit file deployment to `/etc/containers/systemd/` |
 
 #### C13 — Observability
 
@@ -567,6 +606,7 @@ Every component design document MUST contain the following sections. This is the
 | LLA | Per-service metrics exposition mechanism (file-based for C++, HTTP for Python) |
 | **Contract** `OBS-1` | Metrics file format and directory convention |
 | Failure Modes | Metrics collector down, stale metrics, metric cardinality explosion |
+| Storage | V04 (:rw for structured logs) |
 
 #### C14 — Deployment Automation
 
@@ -575,8 +615,9 @@ Every component design document MUST contain the following sections. This is the
 | HLA | `setup.sh` phase diagram (16 steps) |
 | LLA | Per-phase idempotency guarantees, rollback procedures |
 | Failure Modes | Partial setup failure, version mismatch, rollback |
-| Security | Supply chain integrity verification (SHA256 for binaries) |
+| Security | Supply chain integrity: GPG verification for apt, SHA256 checksums for downloaded binaries (nrfutil, ubertooth), digest pinning for container images (`@sha256:`), hash-pinning for Python (`uv --require-hashes`), `npm audit` in CI |
 | **Storage budget** | Formal disk space calculation per component |
+| Storage | Host directory creation, Podman volume creation, tmpfiles install |
 
 ### 5.3 Contract Registry (Consolidated)
 
@@ -592,7 +633,7 @@ All inter-component contracts are numbered in this project's namespace:
 | ROTATION-1 | Rotation | Filesystem | Filename convention | — |
 | GAP-1 | Detector | DB | Gap definition rule | CONTRACT 8.6-A |
 | GAP-2 | Backfill | PCAP files | Filename → bucket window | — |
-| DEEP-1 | Deep parser | ML / filesystem | JSONL | CONTRACT 8.8-A |
+| DEEP-1 | Deep parser | ML / filesystem | JSONL with CRC status field, sniffer-type field, per-DLT metadata | CONTRACT 8.8-A |
 | ML-1 | ML enrichment | DB | enrichment_data JSONB | — |
 | API-1 | API | Frontend | REST/JSON | CONTRACT 8.10-A |
 | OBS-1 | All services | Scraper | Metrics file/HTTP format | — |
@@ -627,21 +668,33 @@ These principles are implemented in two phases:
 
 ---
 
-## 7. Open Decisions from Reviews
+## 7. Resolved Decisions
 
-These decisions must be resolved before Phase B begins.
+All decisions from the specialist reviews have been resolved. See `docs/project-management/passports/TIANER-001-passport.md` for the complete decision log (24 decisions: D-01 through D-12, NEW container orchestration, Q1 through Q11).
 
-| ID | Topic | Recommended Default | Raised By |
-|----|-------|---------------------|-----------|
-| D-01 | Database name: `tianer` or `blesniff` | `tianer` (project-level) | SW Eng |
-| D-02 | Environment variable prefix: `TIANER_*` for shared, `BLESNIFF_*` for module | Split prefix | SW Eng |
-| D-03 | nRF52840 sniffer USB PID: `520f` or `522A` | Validate at T01 with `lsusb`, support both | HW Eng + Wireless |
-| D-04 | USB topology for 4 sniffers on 3-port CM5 | 3 sniffers max without hub; or specify powered USB hub | HW Eng |
-| D-05 | Channel coverage strategy: single-channel per sniffer or channel-hopping | Document limitation; default to ch37 per sniffer; 3 sniffers for full coverage | Wireless |
-| D-06 | TLS on API: self-signed cert localhost or WireGuard-only | Mandate TLS, even self-signed | Security |
-| D-07 | Disk encryption on Pi CM5 | LUKS if TPM available; otherwise document accepted risk | Security |
-| D-08 | Metrics exposition mechanism for C++ services | File-based Prometheus text format per service | SW Eng |
-| D-09 | Ingest bridge buffer size: 10K rows or larger | 60K rows (~60s at 1000 pps) | SW Eng |
-| D-10 | PCAP dedup unique index granularity | Add `pdu_type` to `(sniffer_id, ts, mac_address, pdu_type)` | SW Eng |
-| D-11 | Heartbeat fallback on DB outage | Local heartbeat file as primary; DB table as secondary | SW Eng |
-| D-12 | tshark field configuration: single config or per-DLT | Per-DLT parameterized config in tshark-wrap.sh | Wireless + SW Eng |
+| ID | Decision | Resolution |
+|----|----------|------------|
+| D-01 | Database name | `tianer` |
+| D-02 | Env var prefix | `TIANER_*` (shared), `BLESNIFF_*` (module) |
+| D-03 | nRF USB PID | Both `522A` (sniffer) and `520f` (DFU); determined in detail design |
+| D-04 | USB topology | Powered USB hub |
+| D-05 | Channel strategy | Configurable per sniffer; dedup at query time |
+| D-06 | API TLS | Self-signed cert, mandatory |
+| D-07 | Disk encryption | Accepted risk for MVP |
+| D-08 | Metrics exposition | File-based Prometheus text format |
+| D-09 | Ingest buffer | 300K rows, 5 min, ~60MB RAM |
+| D-10 | Dedup index | Add `pdu_type`; query-time dedup |
+| D-11 | Heartbeat fallback | Local file primary, DB secondary |
+| D-12 | tshark config | Per-DLT parameterized |
+| NEW | Container orchestration | Podman + Quadlet, all-container |
+| Q1 | Container model | All containers, rootless Podman, USB passthrough |
+| Q2 | Monorepo layout | `tian-er/` authoritative (component-breakdown) |
+| Q3 | nRF PID determination | During detailed design with hardware |
+| Q4 | USB symlinks | Persistent udev device names |
+| Q5 | Bluetooth schema | Isolated `bluetooth` schema |
+| Q6 | Channel strategy | Configurable per sniffer |
+| Q7 | CRC-24 | Verify in C07 Deep Parser |
+| Q8 | Secrets rotation | Deferred to post-MVP |
+| Q9 | DB roles | Write-only for streams, read-only for UI |
+| Q10 | Supply chain integrity | Required for MVP |
+| Q11 | Storage strategy | 7 volumes, 2 pods, per-container matrix (see storage-strategy.md) |
