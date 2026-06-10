@@ -12,7 +12,7 @@
 
 ### 1.1 Purpose
 
-C07 Deep Parser is a **batch offline parser** for rotated BLE PCAP files. It reads compressed or uncompressed PCAP files produced by C03 Capture Pipeline and rotated by C04 PCAP Rotation, dissects raw BLE link-layer PDUs, parses AdvData TLV structures, and emits structured JSON Lines (JSONL) to the V05 data volume for downstream consumption by C08 ML Enrichment.
+C07 Deep Parser is a **batch offline parser** for rotated BLE PCAP files. It reads compressed or uncompressed PCAP files produced by C03 Capture Pipeline and rotated by C04 PCAP Rotation, dissects raw BLE link-layer PDUs [1], parses AdvData TLV structures [5], and emits structured JSON Lines (JSONL) to the V05 data volume for downstream consumption by C08 ML Enrichment.
 
 The deep parser operates **outside the real-time hot path**. It runs on closed, rotated PCAP files — never on the live `current.pcap` being written by the sniffer. This separation ensures that deep packet inspection (which is computationally intensive) cannot introduce backpressure into the real-time ingest pipeline.
 
@@ -21,11 +21,11 @@ The deep parser operates **outside the real-time hot path**. It runs on closed, 
 | In Scope | Out of Scope |
 |----------|-------------|
 | Read PCAP files (`.pcap`, `.pcap.zst`) from V02 (`:ro`) | Reading live `current.pcap` (still being written) |
-| Dissect BLE advertising channel PDU headers (PDU type, TxAdd, RxAdd, length) | Dissecting data channel PDUs (connection-oriented traffic) |
-| Parse AdvData TLV structures (flags, local name, TX power, service UUIDs, manufacturer data) | Parse extended advertising (BLE 5.0 ADV_EXT_IND payloads) |
-| **Configurable CRC-24 verification** of PDU payloads (default: enabled) | Connection parameter parsing (CONNECT_IND payload) |
+| Dissect BLE advertising channel PDU headers (PDU type, TxAdd, RxAdd, length) [1] | Dissecting data channel PDUs (connection-oriented traffic) |
+| Parse AdvData TLV structures (flags, local name, TX power, service UUIDs, manufacturer data) [5] | Parse extended advertising (BLE 5.0 ADV_EXT_IND payloads) |
+| **Configurable CRC-24 verification** of PDU payloads (default: enabled) [1] | Connection parameter parsing (CONNECT_IND payload) |
 | Emit JSONL with CRC status, sniffer-type, and per-DLT metadata | Write directly to PostgreSQL database (JSONL files are consumed by C08) |
-| Transparent zstd decompression via piped input | `zlib` or `gzip` decompression (only `zstd` is used by C04) |
+| Transparent zstd decompression via piped input [4] | `zlib` or `gzip` decompression (only `zstd` is used by C04) |
 | 100 MB memory cap during processing | Parallel processing of multiple files (single-threaded, one file at a time) |
 | Atomic `.done` marker for completed output files | Progress resumption for partially-processed files (processes each file from scratch) |
 
@@ -225,18 +225,18 @@ PostgreSQL (via tianer_writer role)
 
 ### 2.3 DLT-Aware Parsing
 
-The PCAP global header contains a **Link-Layer Type (DLT)** field that identifies the format of the packet data. Different sniffer hardware produces different DLT values. C07 must use the DLT to correctly interpret the packet bytes.
+The PCAP global header contains a **Link-Layer Type (DLT)** field that identifies the format of the packet data. Different sniffer hardware produces different DLT values [2]. C07 must use the DLT to correctly interpret the packet bytes.
 
 | Sniffer Type | Expected DLT | DLT Value | Packet Format |
 |-------------|-------------|-----------|---------------|
-| Ubertooth One | `LINKTYPE_BLUETOOTH_LE_LL` | 251 | BLE Link Layer header + PDU (as transmitted on air, dewhitened by firmware) |
-| Nordic nRF Sniffer | `LINKTYPE_NORDIC_BLE` | 272 | Nordic header + BLE Link Layer PDU |
+| Ubertooth One | `LINKTYPE_BLUETOOTH_LE_LL_WITH_PHDR` | 256 | BLE Link Layer header + PDU (as transmitted on air, dewhitened by firmware) [2] |
+| Nordic nRF Sniffer | `LINKTYPE_NORDIC_BLE` | 272 | Nordic header + BLE Link Layer PDU [2] |
 
-**DLT reading:** C07 reads the DLT from the first PCAP file's global header via `pcap_datalink()`. It matches this against known values. If the DLT is unrecognized, C07 logs a warning and skips the file.
+**DLT reading:** C07 reads the DLT from the first PCAP file's global header via `pcap_datalink()` [3]. It matches this against known values. If the DLT is unrecognized, C07 logs a warning and skips the file.
 
 **Per-DLT metadata:** The DLT value and sniffer type are included in the JSONL output (`dlt` and `sniffer_type` fields) so that downstream consumers (C08) can apply DLT-specific logic if needed.
 
-**Dewhitened data assumption:** C07 assumes that the sniffer firmware (Ubertooth tools, nrfutil) has already dewhitened the BLE packets before writing to PCAP. The parser does **not** re-apply or verify dewhitening. This is consistent with both sniffer toolsets: Ubertooth dewhitens in hardware/firmware; nrfutil provides dewhitened output in the Nordic DLT format.
+**Dewhitened data assumption:** C07 assumes that the sniffer firmware (Ubertooth tools, nrfutil) has already dewhitened the BLE packets before writing to PCAP. The parser does **not** re-apply or verify dewhitening. This is consistent with both sniffer toolsets: Ubertooth dewhitens in hardware/firmware; nrfutil provides dewhitened output in the Nordic DLT format. Data whitening in BLE uses a 7-bit LFSR with polynomial x^7 + x^4 + 1, seeded per-channel [1].
 
 ### 2.4 Volume Mount Strategy
 
@@ -268,7 +268,7 @@ The JSONL output schema extends the original CONTRACT 8.8-A from inception.md to
   },
   "sniffer_id": 1,
   "sniffer_type": "ubertooth",
-  "dlt": 251,
+  "dlt": 256,
   "mac": "aa:bb:cc:dd:ee:ff",
   "address_type": "random",
   "rssi": -67,
@@ -304,7 +304,7 @@ The JSONL output schema extends the original CONTRACT 8.8-A from inception.md to
 | `frame.cap_len` | integer | Yes | Captured length from PCAP header (may be less than `len` if truncation occurred). |
 | `sniffer_id` | integer | Yes | Sniffer identifier (references `bluetooth.sniffers.sniffer_id`). |
 | `sniffer_type` | string | Yes | Sniffer hardware type. One of: `"ubertooth"`, `"nrf"`. |
-| `dlt` | integer | Yes | DLT (Link-Layer Type) from PCAP global header. `251` = Bluetooth LE LL, `272` = Nordic BLE. |
+| `dlt` | integer | Yes | DLT (Link-Layer Type) from PCAP global header. `256` = Bluetooth LE LL with pseudo-header, `272` = Nordic BLE [2]. |
 | `mac` | string | Yes | Device MAC address in colon-hex format (`"aa:bb:cc:dd:ee:ff"`). |
 | `address_type` | string | Yes | `"public"` or `"random"` based on PDU header `TxAdd` bit. |
 | `rssi` | integer \| null | No | RSSI from PCAP metadata (dBm). Null if not available. |
@@ -317,8 +317,8 @@ The JSONL output schema extends the original CONTRACT 8.8-A from inception.md to
 | `advdata.tx_power` | integer \| null | No | TX power from AD type 0x0A (dBm). |
 | `advdata.service_uuids_16` | array of strings | No | Array of 16-bit UUIDs in hex format (e.g., `["180D"]`). Aggregated from AD types 0x02, 0x03. |
 | `advdata.service_uuids_128` | array of strings | No | Array of 128-bit UUIDs in hex format. Aggregated from AD types 0x06, 0x07. |
-| `advdata.manufacturer` | object \| null | No | Manufacturer-specific data from AD type 0xFF. |
-| `advdata.manufacturer.company_id` | string | Yes (if manufacturer present) | Bluetooth SIG Company Identifier as 4-char hex string (e.g., `"004C"` for Apple). |
+| `advdata.manufacturer` | object \| null | No | Manufacturer-specific data from AD type 0xFF [5][6]. |
+| `advdata.manufacturer.company_id` | string | Yes (if manufacturer present) | Bluetooth SIG Company Identifier as 4-char hex string (e.g., `"004C"` for Apple) [6]. |
 | `advdata.manufacturer.data_hex` | string | Yes (if manufacturer present) | Remaining manufacturer data bytes as hex string. |
 | `advdata.service_data` | array of objects | No | Service data entries from AD types 0x16, 0x20, 0x21. Each entry has `uuid` (hex string) and `data_hex` (hex string). |
 | `raw_advdata_hex` | string \| null | No | Full raw AdvData bytes as hex string. Available even when TLV parsing fails, enabling reprocessing/debugging. |
@@ -430,7 +430,7 @@ blesniff-deep-parse \
 
 ### 4.3 pca_input — PCAP Input Module
 
-**Purpose:** Read PCAP files, transparently handle zstd compression, enforce memory bounds.
+**Purpose:** Read PCAP files, transparently handle zstd compression [4], enforce memory bounds.
 
 #### 4.3.1 Interface
 
@@ -457,7 +457,7 @@ struct PcapPacket {
 
 enum class DltType {
     Unknown = -1,
-    BluetoothLeLL = 251,      // LINKTYPE_BLUETOOTH_LE_LL
+    BluetoothLeLLWithPhdr = 256,  // LINKTYPE_BLUETOOTH_LE_LL_WITH_PHDR
     NordicBle = 272,          // LINKTYPE_NORDIC_BLE
 };
 
@@ -522,7 +522,7 @@ PcapMetadata PCAInput::metadata() const {
     meta.link_type_raw = dlt_raw;
     meta.snaplen = pcap_snapshot(handle);
     switch (dlt_raw) {
-        case 251: meta.dlt = DltType::BluetoothLeLL; break;
+        case 256: meta.dlt = DltType::BluetoothLeLLWithPhdr; break;
         case 272: meta.dlt = DltType::NordicBle;    break;
         default:  meta.dlt = DltType::Unknown;       break;
     }
@@ -603,7 +603,7 @@ const char* pdu_type_string(uint8_t raw);
 
 #### 4.4.2 BLE PDU Format (After Dewhitening)
 
-C07 operates on **dewhitened** data (sniffer firmware handles dewhitening). The byte layout is:
+C07 operates on **dewhitened** data (sniffer firmware handles dewhitening). The byte layout, per the Bluetooth Core Specification v5.4, Vol 6, Part B [1], is:
 
 ```
 Byte offset:  0       3  4       5       11      11+L
@@ -675,7 +675,7 @@ dissect_ble_pdu(data, len, verify_crc):
 
 namespace tianer::crc {
 
-// Bluetooth CRC-24 parameters per BLE Core Spec Vol 6 Part B §3.1.1
+// Bluetooth CRC-24 parameters per BLE Core Spec Vol 6 Part B §3.1.1 [1]
 inline constexpr uint32_t CRC24_POLY = 0x00065B;
 inline constexpr uint32_t CRC24_INIT = 0x555555;
 
@@ -697,7 +697,7 @@ Per the ADR-0001 Q7 resolution, CRC-24 verification is **configurable**, **defau
 
 ### 4.5 advdata_parser — AdvData TLV Parser
 
-**Purpose:** Parse the advertising data payload using the Length-Type-Value (LTV) format defined in Bluetooth Core Specification Supplement, Common Advertising and Scan Response Data Format.
+**Purpose:** Parse the advertising data payload using the Length-Type-Value (LTV) format defined in Bluetooth Core Specification Supplement, Common Advertising and Scan Response Data Format [5].
 
 #### 4.5.1 Interface
 
@@ -762,20 +762,20 @@ The parser walks the byte array sequentially. If a TLV entry's Length would exte
 
 | AD Type | Name | Parser Action | Example |
 |---------|------|---------------|---------|
-| `0x01` | Flags | Extract low byte → `flags` | `020106` → flags = 6 |
-| `0x02` | Incomplete List of 16-bit Service UUIDs | Extract UUIDs (2 bytes each, little-endian) → `service_uuids_16` | `03023A12` → `["123A"]` |
-| `0x03` | Complete List of 16-bit Service UUIDs | Same as 0x02 → `service_uuids_16` | |
-| `0x04` | Incomplete List of 32-bit Service UUIDs | Skip (not standard — use 128-bit) | |
-| `0x05` | Complete List of 32-bit Service UUIDs | Skip | |
-| `0x06` | Incomplete List of 128-bit Service UUIDs | Extract UUIDs (16 bytes each) → `service_uuids_128` | |
-| `0x07` | Complete List of 128-bit Service UUIDs | Same → `service_uuids_128` | |
-| `0x08` | Shortened Local Name | Extract UTF-8 string → `local_name` | |
-| `0x09` | Complete Local Name | Extract UTF-8 string → `local_name` (overrides 0x08) | |
-| `0x0A` | TX Power Level | Extract signed byte → `tx_power` | |
-| `0x16` | Service Data — 16-bit UUID | Extract UUID + data → `service_data` | |
-| `0x20` | Service Data — 32-bit UUID | Extract UUID + data → `service_data` | |
-| `0x21` | Service Data — 128-bit UUID | Extract UUID + data → `service_data` | |
-| `0xFF` | Manufacturer Specific Data | Extract 2-byte company ID (little-endian) + remaining data → `manufacturer` | |
+| `0x01` | Flags | Extract low byte → `flags` [5] | `020106` → flags = 6 |
+| `0x02` | Incomplete List of 16-bit Service UUIDs | Extract UUIDs (2 bytes each, little-endian) → `service_uuids_16` [5] | `03023A12` → `["123A"]` |
+| `0x03` | Complete List of 16-bit Service UUIDs | Same as 0x02 → `service_uuids_16` [5] | |
+| `0x04` | Incomplete List of 32-bit Service UUIDs | Skip (not standard — use 128-bit) [5] | |
+| `0x05` | Complete List of 32-bit Service UUIDs | Skip [5] | |
+| `0x06` | Incomplete List of 128-bit Service UUIDs | Extract UUIDs (16 bytes each) → `service_uuids_128` [5] | |
+| `0x07` | Complete List of 128-bit Service UUIDs | Same → `service_uuids_128` [5] | |
+| `0x08` | Shortened Local Name | Extract UTF-8 string → `local_name` [5] | |
+| `0x09` | Complete Local Name | Extract UTF-8 string → `local_name` (overrides 0x08) [5] | |
+| `0x0A` | TX Power Level | Extract signed byte → `tx_power` [5] | |
+| `0x16` | Service Data — 16-bit UUID | Extract UUID + data → `service_data` [5] | |
+| `0x20` | Service Data — 32-bit UUID | Extract UUID + data → `service_data` [5] | |
+| `0x21` | Service Data — 128-bit UUID | Extract UUID + data → `service_data` [5] | |
+| `0xFF` | Manufacturer Specific Data | Extract 2-byte company ID (little-endian) + remaining data → `manufacturer` [5][6] | |
 
 **Unknown AD types** are skipped silently — they consume their `(1 + Length)` bytes and are not reported as errors. The parser is forward-compatible with new AD types.
 
@@ -783,7 +783,7 @@ The parser walks the byte array sequentially. If a TLV entry's Length would exte
 
 ### 4.6 jsonl_output — JSONL Serialisation and Atomic Output
 
-**Purpose:** Serialise parsed packet data to JSON Lines format with atomic completion signalling.
+**Purpose:** Serialise parsed packet data to JSON Lines format with atomic completion signalling using the nlohmann/json library [7].
 
 #### 4.6.1 Interface
 
@@ -965,9 +965,9 @@ void process_file(const std::string& pcap_file,
 
 ### 4.8 DLT-Specific Packet Headers
 
-#### 4.8.1 DLT 251 — LINKTYPE_BLUETOOTH_LE_LL
+#### 4.8.1 DLT 256 — LINKTYPE_BLUETOOTH_LE_LL_WITH_PHDR
 
-The packet data contains raw BLE link-layer frames as transmitted on air. The pcap header includes an optional pseudo-header:
+The packet data contains raw BLE link-layer frames as transmitted on air. The pcap header includes an optional pseudo-header [2]:
 
 ```
 ┌──────────────┬───────────────────────────────────┐
@@ -980,7 +980,7 @@ C07 uses libpcap's `pcap_datalink()` to identify the DLT, reads the packet paylo
 
 #### 4.8.2 DLT 272 — LINKTYPE_NORDIC_BLE
 
-The Nordic DLT format adds a header before the BLE payload:
+The Nordic DLT format adds a header before the BLE payload [2]:
 
 ```
 ┌──────────────────┬──────────────┬───────────────────────────────────┐
@@ -1099,7 +1099,7 @@ All log output uses the standard Tian'er structured format:
 
 ```
 TIANER | {"ts":"2026-06-09T15:30:00Z","level":"INFO","component":"deep-parser","msg":"Starting processing","files_found":12,"crc_verify":"on"}
-TIANER | {"ts":"2026-06-09T15:30:01Z","level":"INFO","component":"deep-parser","msg":"Processing file","file":"/var/lib/tianer/pcap/ut1/20260606-1200.pcap.zst","dlt":251,"sniffer":"ut1"}
+TIANER | {"ts":"2026-06-09T15:30:01Z","level":"INFO","component":"deep-parser","msg":"Processing file","file":"/var/lib/tianer/pcap/ut1/20260606-1200.pcap.zst","dlt":256,"sniffer":"ut1"}
 TIANER | {"ts":"2026-06-09T15:30:15Z","level":"INFO","component":"deep-parser","msg":"File complete","file":"/var/lib/tianer/pcap/ut1/20260606-1200.pcap.zst","packets":184231,"crc_errors":12,"duration_ms":14203}
 TIANER | {"ts":"2026-06-09T15:30:15Z","level":"ERROR","component":"deep-parser","msg":"Decompression failed","file":"/var/lib/tianer/pcap/ut1/20260606-1230.pcap.zst","exit_code":1}
 TIANER | {"ts":"2026-06-09T15:35:00Z","level":"INFO","component":"deep-parser","msg":"Run complete","files_processed":11,"files_skipped":1,"total_packets":1850000,"total_crc_errors":150,"duration_s":300}
@@ -1248,7 +1248,7 @@ All tests use GoogleTest 1.14 with CMake discovery (`gtest_discover_tests`). Tes
 | `CRC24Test` | `tests/crc24_test.cpp` | `ZeroLengthInput`, `KnownVector_ADV_IND`, `KnownVector_ADV_NONCONN_IND`, `ConsistencyWithPython`, `AllZeros`, `AllOnes`, `IncrementalUpdate` |
 | `BleDissectorTest` | `tests/ble_dissector_test.cpp` | `DissectADV_IND_HappyPath`, `DissectADV_NONCONN_IND`, `DissectADV_SCAN_IND`, `DissectSCAN_REQ`, `DissectSCAN_RSP`, `DissectCONNECT_IND`, `TruncatedPDU_TooShort`, `TruncatedPDU_BadLength`, `PDUTypeOutOfRange`, `EmptyAdvData`, `MaxAdvData_31Bytes`, `CRCValidPassed`, `CRCValidFailed`, `CRCVerificationDisabled` "crc_valid=null", `PDUTypeStringAllValues` |
 | `AdvDataParserTest` | `tests/advdata_parser_test.cpp` | `ParseFlags_0x01`, `ParseShortenedName_0x08`, `ParseCompleteName_0x09`, `ParseTXPower_0x0A`, `Parse16BitServiceUUIDs_0x02`, `Parse128BitServiceUUIDs_0x07`, `ParseManufacturerData_0xFF`, `ParseServiceData_0x16`, `MixedTLV_ParseCorrectly`, `EmptyAdvData_ReturnsEmpty`, `TLVOverrunsLength`, `UnknownADType_Skipped`, `ZeroLengthTLV_Skipped`, `TruncatedTLV_StopsAtBoundary` |
-| `PcapInputTest` | `tests/pca_input_test.cpp` | `OpenValidPcap`, `OpenCorruptPcap`, `DetectDLT_BluetoothLeLL`, `DetectDLT_NordicBle`, `DetectDLT_Unknown`, `PacketIteration_AllPackets`, `FileNotFound`, `ZstdDecompression_Valid`, `ZstdDecompression_Corrupt` |
+| `PcapInputTest` | `tests/pca_input_test.cpp` | `OpenValidPcap`, `OpenCorruptPcap`, `DetectDLT_BluetoothLeLLWithPhdr`, `DetectDLT_NordicBle`, `DetectDLT_Unknown`, `PacketIteration_AllPackets`, `FileNotFound`, `ZstdDecompression_Valid`, `ZstdDecompression_Corrupt` |
 | `JsonlOutputTest` | `tests/jsonl_output_test.cpp` | `WriteValidRecord`, `SchemaFieldsPresent`, `FinishCreatesDoneFile`, `FinishFailsOnIOError`, `DoneNotCreatedOnPartialWrite`, `ReopenDoesNotOverwriteDone` |
 
 #### 10.1.1 Golden Test Vectors (CRC-24)
@@ -1305,7 +1305,7 @@ TEST(CRC24Test, KnownVector_ADV_IND) {
 
 | File | Source / Generation | Purpose |
 |------|--------------------|---------|
-| `tests/fixtures/pcap/ubertooth-sample-001.pcap` | Real hardware capture, anonymised MACs | Golden test — Ubertooth DLT 251 |
+| `tests/fixtures/pcap/ubertooth-sample-001.pcap` | Real hardware capture, anonymised MACs | Golden test — Ubertooth DLT 256 |
 | `tests/fixtures/pcap/nrf-sample-001.pcap` | Real hardware capture, anonymised MACs | Golden test — Nordic DLT 272 |
 | `tests/fixtures/pcap/synthetic-basic.pcap` | `tools/generate-pcap.py` | Known packet content for unit tests |
 | `tests/fixtures/pcap/synthetic-corrupt-crc.pcap` | Hand-crafted | CRC error path testing |
@@ -1549,6 +1549,8 @@ Before considering C07 deployed, verify:
 
 ## Appendix A: PDU Type Reference
 
+PDU types as defined in Bluetooth Core Specification v5.4, Vol 6, Part B, Section 2.3 [1].
+
 | Value | Name | Description | AdvData Present? | AdvA Present? | Target Address Present? |
 |-------|------|-------------|------------------|---------------|------------------------|
 | 0 | ADV_IND | Connectable undirected advertising | Yes (0–31 bytes) | Yes | No |
@@ -1563,6 +1565,8 @@ Before considering C07 deployed, verify:
 **PDU Type filtering rationale:** The deep parser processes all PDU types, but AdvData TLV parsing is only meaningful for types that carry advertising data (0, 2, 4, 6). For types 1 (directed), 3, and 5, the advdata field in the JSONL output is `null`. For type 7 (extended), the parsing is deferred to a future version.
 
 ## Appendix B: AD Type Reference
+
+AD types as defined in Bluetooth Core Specification Supplement v11, Part A [5] and Company Identifiers [6].
 
 | AD Type | Name | Bytes | Output Field |
 |---------|------|-------|-------------|
@@ -1605,6 +1609,24 @@ if __name__ == "__main__":
     data = bytes.fromhex(sys.argv[1])
     print(f"CRC-24: 0x{crc24(data):06X}")
 ```
+
+---
+
+## References
+
+[1] Bluetooth SIG. "Bluetooth Core Specification v5.4, Vol 6, Part B — Link Layer Specification." https://www.bluetooth.com/specifications/specs/core-specification-5-4/, 2023.
+
+[2] The Tcpdump Group. "Link-Layer Header Types." https://www.tcpdump.org/linktypes.html, accessed 2026.
+
+[3] The Tcpdump Group. "pcap(3PCAP) — Packet Capture Library." https://www.tcpdump.org/manpages/pcap.3pcap.html
+
+[4] IETF. "RFC 8878 — Zstandard Compression and the 'application/zstd' Media Type." https://www.rfc-editor.org/rfc/rfc8878, February 2021.
+
+[5] Bluetooth SIG. "Core Specification Supplement v11, Part A — Data Types Specification." https://www.bluetooth.com/specifications/specs/core-specification-supplement-11/, 2023.
+
+[6] Bluetooth SIG. "Company Identifiers." https://www.bluetooth.com/specifications/assigned-numbers/company-identifiers/, accessed 2026.
+
+[7] Lohmann, N. "JSON for Modern C++." https://github.com/nlohmann/json, v3.11+.
 
 ---
 

@@ -1187,7 +1187,7 @@ Secondary verification runs on a separate, longer cadence (e.g., every 30 minute
 
 ### 10.1 Unit Tests
 
-Tested with pytest 8.0+. Test files in `modules/bluetooth/gap-detector/tests/`.
+Tested with pytest 8.0+ [8]. Test files in `modules/bluetooth/gap-detector/tests/`.
 
 | Test Suite | File | Scope |
 |-----------|------|-------|
@@ -1313,3 +1313,5 @@ uv run pytest tests/  # Run unit tests
 [6] Python Software Foundation. "Python 3.13 — Event Loop (asyncio)." https://docs.python.org/3/library/asyncio-eventloop.html, 2024. Referenced for `asyncio.sleep()` for timer-based scheduling, `asyncio.create_subprocess_exec()` for non-blocking subprocess invocation, and `asyncio.wait_for()` for subprocess timeout.
 
 [7] The Tcpdump Group. "PCAP Savefile Format." https://www.tcpdump.org/manpages/pcap-savefile.5.txt, 2024. Referenced for PCAP global header structure, DLT encoding, and per-packet header format — ensures C06 correctly interprets rotated PCAP files.
+
+[8] pytest. "pytest: helps you write better programs." https://docs.pytest.org/en/stable/, v8.0+. — Documents pytest testing framework: test discovery conventions, fixture system (`@pytest.fixture`), parametrize decorator, mock integration, and `pytest.raises()` for exception testing (§10.1, §10.3).

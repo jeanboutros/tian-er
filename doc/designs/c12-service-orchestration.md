@@ -100,18 +100,19 @@ Tian'er uses two Podman-managed pods and two standalone containers, all running 
 │  │  │  (template x N):            │  │   tianer-api (C09)          │ │  │
 │  │  │   tianer-sniffer@           │  │   tianer-gap-detect (C06)   │ │  │
 │  │  │   tianer-tshark@            │  │   tianer-deep-parse (C07)   │ │  │
-│  │  │   tianer-ingest@            │  │   tianer-ml-classify (C08)  │ │  │
-│  │  │   tianer-heartbeat@         │  │   tianer-rotate (C04)       │ │  │
+│  │  │   tianer-heartbeat@         │  │   tianer-ml-classify (C08)  │ │  │
+│  │  │                             │  │   tianer-ingest@ (C05)      │ │  │
+│  │  │                             │  │   tianer-rotate (C04)       │ │  │
 │  │  │                             │  │   tianer-prometheus (C13)   │ │  │
 │  │  │  Shared volumes:            │  │   tianer-promtail (C13)     │ │  │
-│  │  │   V01 :ro, V02 :rw, V03 :rw│  │                             │ │  │
-│  │  │   V04 :rw, V08 tmpfs       │  │  Shared volumes:            │ │  │
+│  │  │   V01 :ro, V02 :rw, V04 :rw│  │                             │ │  │
+│  │  │   V08 tmpfs                 │  │  Shared volumes:            │ │  │
 │  │  │                             │  │   V01 :ro, V02 (varies),   │ │  │
-│  │  │  Inter-container:           │  │   V04 :rw, V05 (varies),   │ │  │
-│  │  │   FIFO IPC (V03)            │  │   V09 tmpfs                 │ │  │
+│  │  │  Inter-container:           │  │   V03 :rw, V04 :rw,        │ │  │
+│  │  │   FIFO IPC (V03 — write)    │  │   V05 (varies), V09 tmpfs   │ │  │
 │  │  │                             │  │                             │ │  │
-│  │  │  DB access: via host        │  │  DB access: tianer-net      │ │  │
-│  │  │  localhost port forward     │  │  bridge to postgres:5432    │ │  │
+│  │  │  No network access —        │  │  DB access: tianer-net      │ │  │
+│  │  │  Network=none               │  │  bridge to postgres:5432    │ │  │
 │  │  └──────────┬──────────────────┘  └──────────────┬─────────────┘ │  │
 │  │             │                                     │               │  │
 │  │             │ 127.0.0.1:5432 (published)          │               │  │
@@ -137,7 +138,7 @@ Tian'er uses two Podman-managed pods and two standalone containers, all running 
 
 | Decision | Rationale |
 |----------|-----------|
-| Capture pod `Network=none` | Sniffers talk only to USB hardware and FIFOs. No network access eliminates attack surface. Ingest bridges connect to PostgreSQL via the host's `127.0.0.1:5432` (published from the postgres container), not via the pod network. |
+| Capture pod `Network=none` | Sniffers talk only to USB hardware and FIFOs. No network access eliminates attack surface. No containers in this pod require TCP connectivity — ingest bridge runs in the platform pod on `tianer-net`. |
 | Platform pod on `tianer-net` bridge | API, gap detector, deep parser, and other platform services need TCP access to PostgreSQL and (in the future) to each other. All on a private bridge with no upstream route. |
 | PostgreSQL + Grafana as standalone containers | These services have their own lifecycle and do not benefit from pod co-location. PostgreSQL persists data across pod restarts. Grafana may be restarted independently for plugin updates. |
 | `--group-add keep-groups` on capture containers | Inherits `plugdev`, `dialout`, `wireshark` host groups for USB device access. |
@@ -176,38 +177,45 @@ The top-level dependency graph is encoded in Quadlet `[Unit]` sections using `Re
 │ ┌──────────────────────┐ │ │ ┌──────────────────────┐ │ │ After=tianer-postgres│
 │ │ tianer-sniffer@      │ │ │ │ tianer-api           │ │ └──────────────────────┘
 │ │ .service (x N)       │ │ │ │ .service             │ │
-│ │ After=tshark@,       │ │ │ │ After=postgres       │ │
-│ │   ingest@            │ │ │ └──────────────────────┘ │
+│ │ After=tshark@        │ │ │ │ After=postgres       │ │
+│ │                       │ │ │ └──────────────────────┘ │
 │ ├──────────────────────┤ │ │ ┌──────────────────────┐ │
-│ │ tianer-tshark@       │ │ │ │ tianer-gap-detect    │ │
-│ │ .service (x N)       │ │ │ │ .service             │ │
-│ │ After=sniffer@?      │ │ │ │ After=postgres       │ │
-│ │ (reads FIFO)         │ │ │ └──────────────────────┘ │
-│ ├──────────────────────┤ │ │ ┌──────────────────────┐ │
-│ │ tianer-ingest@       │ │ │ │ tianer-deep-parse    │ │
-│ │ .service (x N)       │ │ │ │ .service (oneshot)   │ │
-│ │ After=tshark@        │ │ │ │ Triggered by timer    │ │
-│ │ Before=sniffer@      │ │ │ └──────────────────────┘ │
-│ ├──────────────────────┤ │ │ ┌──────────────────────┐ │
-│ │ tianer-heartbeat@    │ │ │ │ tianer-ml-classify   │ │
-│ │ .service (x N)       │ │ │ │ .service             │ │
-│ │ After=sniffer@       │ │ │ │ After=deep-parse     │ │
-│ └──────────────────────┘ │ │ └──────────────────────┘ │
-└─────────────────────────┘ │ ┌──────────────────────┐ │
-                             │ │ tianer-rotate        │ │
-                             │ │ .service (oneshot)   │ │
-                             │ │ Triggered by timer    │ │
-                             │ └──────────────────────┘ │
-                             │ ┌──────────────────────┐ │
-                             │ │ tianer-prometheus    │ │
-                             │ │ .service             │ │
-                             │ │ After=api, postgres  │ │
-                             │ └──────────────────────┘ │
-                             │ ┌──────────────────────┐ │
-                             │ │ tianer-promtail      │ │
-                             │ │ .service             │ │
-                             │ │ After=postgres       │ │
-                             │ └──────────────────────┘ │
+│ │ tianer-tshark@       │ │ │ │ tianer-ingest@       │ │
+│ │ .service (x N)       │ │ │ │ .service (x N)       │ │
+│ │ After=sniffer@?      │ │ │ │ After=tshark@        │ │
+│ │ (reads FIFO)         │ │ │ │ Before=sniffer@      │ │
+│ ├──────────────────────┤ │ │ │ After=postgres       │ │
+│ │ tianer-heartbeat@    │ │ │ └──────────────────────┘ │
+│ │ .service (x N)       │ │ │ ┌──────────────────────┐ │
+│ │ After=sniffer@       │ │ │ │ tianer-gap-detect    │ │
+│ └──────────────────────┘ │ │ │ .service             │ │
+└─────────────────────────┘ │ │ │ After=postgres       │ │
+                             │ │ └──────────────────────┘ │
+                             │ │ ┌──────────────────────┐ │
+                             │ │ │ tianer-deep-parse    │ │
+                             │ │ │ .service (oneshot)   │ │
+                             │ │ │ Triggered by timer    │ │
+                             │ │ └──────────────────────┘ │
+                             │ │ ┌──────────────────────┐ │
+                             │ │ │ tianer-ml-classify   │ │
+                             │ │ │ .service             │ │
+                             │ │ │ After=deep-parse     │ │
+                             │ │ └──────────────────────┘ │
+                             │ │ ┌──────────────────────┐ │
+                             │ │ │ tianer-rotate        │ │
+                             │ │ │ .service (oneshot)   │ │
+                             │ │ │ Triggered by timer    │ │
+                             │ │ └──────────────────────┘ │
+                             │ │ ┌──────────────────────┐ │
+                             │ │ │ tianer-prometheus    │ │
+                             │ │ │ .service             │ │
+                             │ │ │ After=api, postgres  │ │
+                             │ │ └──────────────────────┘ │
+                             │ │ ┌──────────────────────┐ │
+                             │ │ │ tianer-promtail      │ │
+                             │ │ │ .service             │ │
+                             │ │ │ After=postgres       │ │
+                             │ │ └──────────────────────┘ │
                              └─────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────────┐
@@ -250,9 +258,6 @@ Phase 3: Pods + Grafana (15–30s, parallel)  ← requires postgres
     │
     │  Within capture pod (per-sniffer instance, sequential):
     │    tianer-tshark@ut1.service .... [STARTING]
-    │    tianer-ingest@ut1.service .... [STARTING]
-    │      ├─ Waits for DB connection . (exponential backoff)
-    │      └─ Pre-warms batch buffer .. [READY]
     │    tianer-sniffer@ut1.service ... [STARTING]
     │      ├─ Opens USB device ........ (udev symlink)
     │      └─ Begins capture .......... [CAPTURING]
@@ -260,6 +265,10 @@ Phase 3: Pods + Grafana (15–30s, parallel)  ← requires postgres
     │    ... (repeat for nrf1, nrf2, nrf3 if enabled)
     │
     │  Within platform pod (parallel):
+    │    tianer-ingest@ut1.service .... [STARTING]
+    │      ├─ Waits for DB connection . (exponential backoff)
+    │      └─ Pre-warms batch buffer .. [READY]
+    │    ... (repeat for nrf1, nrf2, nrf3 if enabled)
     │    tianer-api.service ........... [STARTING]
     │      └─ FastAPI lifespan ........ (pool warm, health OK)
     │    tianer-gap-detect.service .... [STARTING]
@@ -330,7 +339,7 @@ All Quadlet files reside in `deploy/containers/` (source) and are deployed to `/
 | 7 | `tianer-grafana.container` | Container | Standalone | `tianer-grafana.service` |
 | 8 | `tianer-sniffer@.container` | Container (template) | Capture pod | `tianer-sniffer@<instance>.service` |
 | 9 | `tianer-tshark@.container` | Container (template) | Capture pod | `tianer-tshark@<instance>.service` |
-| 10 | `tianer-ingest@.container` | Container (template) | Capture pod | `tianer-ingest@<instance>.service` |
+| 10 | `tianer-ingest@.container` | Container (template) | Platform pod | `tianer-ingest@<instance>.service` |
 | 11 | `tianer-heartbeat@.container` | Container (template) | Capture pod | `tianer-heartbeat@<instance>.service` |
 | 12 | `tianer-rotate.container` | Container (oneshot) | Platform pod | `tianer-rotate.service` |
 | 13 | `tianer-gap-detect.container` | Container | Platform pod | `tianer-gap-detect.service` |
@@ -341,7 +350,7 @@ All Quadlet files reside in `deploy/containers/` (source) and are deployed to `/
 | 18 | `tianer-promtail.container` | Container | Platform pod | `tianer-promtail.service` |
 | 19 | `tianer.target` | Target | — | `tianer.target` |
 
-**File count summary:** 14 `.container` files, 2 `.volume` files, 1 `.network` file, 2 `.pod` files = 19 Quadlet source files. This produces approximately 15–25 systemd `--user` units depending on how many sniffer instances are configured (1–4 sniffers, each generating 4 service units: sniffer@, tshark@, ingest@, heartbeat@).
+**File count summary:** 14 `.container` files, 2 `.volume` files, 1 `.network` file, 2 `.pod` files = 19 Quadlet source files. This produces approximately 15–25 systemd `--user` units depending on how many sniffer instances are configured (1–4 sniffers, each generating 4 service units: sniffer@, tshark@, heartbeat@ per capture pod; ingest@ in platform pod).
 
 ### 3.2 Template Unit Naming Convention
 
@@ -453,7 +462,7 @@ Label=app=tianer,component=grafana,volume=data
 ```ini
 # deploy/containers/tianer-capture.pod
 [Unit]
-Description=Tian'er Capture Pod (sniffer + tshark + ingest + heartbeat)
+Description=Tian'er Capture Pod (sniffer + tshark + heartbeat)
 Requires=tianer-postgres.service
 After=tianer-postgres.service
 
@@ -468,21 +477,13 @@ WantedBy=tianer.target
 
 **Rationale for `Network=none`:**
 - Sniffer containers communicate only with USB hardware via `--device` passthrough.
-- tshark and ingest containers communicate via FIFO IPC (V03), not TCP.
-- Ingest bridges connect to PostgreSQL via the **host's loopback** (`127.0.0.1:5432`), which is published from the PostgreSQL standalone container. This works because `Network=none` pods add an implicit `slirp4netns` port forwarder when the container uses `localhost` (Podman automatically creates a user-mode network stack for loopback access in `Network=none` containers when `slirp4netns` or `pasta` is available).
-
-**Correction on Network=none + loopback:** With rootless Podman, containers in a `Network=none` pod have no network interface at all — not even loopback. Ingest bridges in such pods cannot reach `127.0.0.1:5432`. To enable DB access from the capture pod, there are two options:
-
-1. **Option A (preferred):** Use `Network=host` for the capture pod, plus `--cap-add CAP_NET_RAW`. This gives the ingest container direct access to the host's loopback where PostgreSQL publishes. Sniffer containers are unaffected (they use USB, not network). Security: `Network=host` is broader than `Network=none` but the capture pod is isolated on a physically secured device.
-
-2. **Option B:** Keep `Network=none` and have the ingest container connect via a Unix-domain socket to a proxy sidecar. Over-engineered for the MVP.
-
-**Decision:** C12 adopts **Option A** for the MVP, with a note that post-MVP can implement Option B if security review requires it. The capture pod uses `Network=host` and the ingest container connects to `127.0.0.1:5432`. Sniffers remain offline — they do not open network connections.
+- tshark communicates via FIFO IPC (V03), not TCP.
+- No container in this pod needs TCP connectivity — the ingest bridge runs in the platform pod (tianer-platform.pod) on the `tianer-net` bridge network where it has direct TCP access to PostgreSQL at `tianer-postgres:5432`.
 
 ```
-# deploy/containers/tianer-capture.pod (corrected for MVP)
+# deploy/containers/tianer-capture.pod
 [Pod]
-Network=host   # enables 127.0.0.1:5432 access for ingest containers
+Network=none
 PodName=tianer-capture
 Label=app=tianer,pod=capture
 ```
@@ -773,11 +774,11 @@ WantedBy=tianer.target
 ```
 
 **Key design:**
-- tshark runs in the same pod as the sniffer, sharing the `Network=host` namespace and the pod's capability set. `dumpcap` requires `CAP_NET_RAW` and `CAP_NET_ADMIN` even when reading from a FIFO (Wireshark's capture engine always checks capabilities).
+- tshark runs in the same pod as the sniffer (capture pod, `Network=none`). `dumpcap` requires `CAP_NET_RAW` and `CAP_NET_ADMIN` even when reading from a FIFO (Wireshark's capture engine always checks capabilities). Neither tshark nor the sniffer need network access — the ingest bridge runs in the platform pod on `tianer-net` for DB connectivity.
 - `Before=tianer-sniffer@%i.service` and `Before=tianer-ingest@%i.service`: tshark must be running before the sniffer starts writing to the FIFO and before the ingest bridge starts reading from the output FIFO. This prevents FIFO write-blocking at startup.
 - No V02 access: tshark does not read or write PCAP files. It reads the raw PCAP stream from the FIFO and writes structured fields to the output FIFO.
 
-#### 4.1.11 tianer-ingest@.container (Capture Pod — Template)
+#### 4.1.11 tianer-ingest@.container (Platform Pod — Template)
 
 ```ini
 # deploy/containers/tianer-ingest@.container
@@ -790,7 +791,7 @@ Before=tianer-sniffer@%i.service
 [Container]
 Image=localhost/tianer-ingest:latest
 ContainerName=tianer-ingest-%i
-Pod=tianer-capture.pod
+Pod=tianer-platform.pod
 
 EnvironmentFile=/etc/tianer/tianer.env
 EnvironmentFile=/etc/tianer/blesniff.env
@@ -829,7 +830,7 @@ WantedBy=tianer.target
 **Key design:**
 - `After=tianer-postgres.service`: The ingest bridge must not start before PostgreSQL is ready. It implements exponential backoff reconnect (per C02 §6.2) at the application level.
 - `Before=tianer-sniffer@%i.service`: The ingest bridge reads from the output FIFO that tshark writes to. By starting before the sniffer, it ensures the FIFO reader exists when data begins flowing — preventing the sniffer from blocking on a full pipe buffer.
-- `SystemCallFilter=@network-io`: Needed for TCP connection to PostgreSQL on `127.0.0.1:5432`. The C++ ingest bridge uses `libpqxx` which requires standard socket syscalls.
+- `SystemCallFilter=@network-io`: Needed for TCP connection to PostgreSQL on `tianer-postgres:5432` via the `tianer-net` bridge. The C++ ingest bridge uses `libpqxx` which requires standard socket syscalls.
 - `MemoryMax=512M`: The ingest bridge buffers up to 300K rows (~60MB RAM per sniffer instance) during DB outages. 512 MB provides generous headroom.
 
 #### 4.1.12 tianer-heartbeat@.container (Capture Pod — Template)
@@ -1208,9 +1209,9 @@ SystemCallFilter restricts which Linux syscalls a container process can make. Th
 | `tianer-platform.pod` | — | `tianer-net.network`, `tianer-postgres.service` | `tianer-net.network`, `tianer-postgres.service` |
 | `tianer-capture.pod` | — | `tianer-postgres.service` | `tianer-postgres.service` |
 | `tianer-grafana.service` | — | `tianer-net.network`, `tianer-postgres.service` | `tianer-net.network`, `tianer-postgres.service` |
-| `tianer-tshark@.service` | `tianer-ingest@.service`, `tianer-sniffer@.service` | — | — |
+| `tianer-tshark@.service` | `tianer-sniffer@.service` | — | — |
 | `tianer-ingest@.service` | `tianer-sniffer@.service` | `tianer-tshark@.service`, `tianer-postgres.service` | — |
-| `tianer-sniffer@.service` | — | `tianer-tshark@.service`, `tianer-ingest@.service` | — |
+| `tianer-sniffer@.service` | — | `tianer-tshark@.service` | — |
 | `tianer-api.service` | — | `tianer-postgres.service` | — |
 | `tianer-gap-detect.service` | — | `tianer-postgres.service` | — |
 | `tianer-deep-parse.service` | — | `tianer-rotate.service` | — |
@@ -1224,7 +1225,7 @@ SystemCallFilter restricts which Linux syscalls a container process can make. Th
 **Key ordering properties:**
 1. **No circular dependencies.** The graph is a strict DAG. Every `Before=` has a corresponding `After=` on the other side. No pair of units has both `Before=` and `After=` pointing at each other.
 2. **PostgreSQL is the central dependency.** All consumers declare `After=tianer-postgres.service`. No consumer declares `Requires=tianer-postgres.service` — this would cause the entire pod to fail if PostgreSQL fails to start. Instead, consumers handle DB unavailability at the application level (exponential backoff reconnect).
-3. **tshark → ingest → sniffer ordering within capture pod.** Ensures FIFO readers exist before the writer starts. This prevents the sniffer from blocking on a full pipe buffer at startup.
+3. **tshark → ingest → sniffer ordering (cross-pod via V03 FIFO).** tshark runs in the capture pod, ingest runs in the platform pod — both pods share V03 as a bind-mounted tmpfs. The FIFO reader (ingest) must exist before the sniffer starts writing to prevent the sniffer from blocking on a full pipe buffer at startup.
 4. **Pods start in parallel after PostgreSQL.** `tianer-platform.pod` and `tianer-capture.pod` both `After=tianer-postgres.service` but have no ordering between them — they start concurrently.
 
 ---
@@ -1256,8 +1257,8 @@ All inter-container communication is explicitly documented. No container implici
 **Communication not listed above is prohibited.** Specifically:
 - No container may access another container's process namespace.
 - No container may bind to a port exposed by another container without an explicit contract above.
-- The capture pod's containers cannot reach containers on `tianer-net` except through the host's published port (PostgreSQL `127.0.0.1:5432`).
-- Platform pod containers cannot access USB devices or raw PCAP FIFOs (V03) — those are exclusive to the capture pod.
+- Platform pod containers share V03 (FIFOs) with the capture pod via host tmpfs bind mount — this is the cross-pod FIFO IPC mechanism.
+- Platform pod containers cannot access USB devices — those are exclusive to the capture pod.
 
 ### 5.2 Contract ORCHESTRATION-1: systemd Unit Dependency
 
@@ -1737,7 +1738,7 @@ Before considering C12 deployed, verify:
 | C02 Database | c02-database.md | `tianer-postgres.container` | `tianer-postgres.service` | Standalone |
 | C03 Capture Pipeline | c03-capture-pipeline.md | `tianer-sniffer@.container`, `tianer-tshark@.container`, `tianer-heartbeat@.container` | `tianer-sniffer@.service`, `tianer-tshark@.service`, `tianer-heartbeat@.service` | Capture pod |
 | C04 PCAP Rotation | c04-pcap-rotation.md | `tianer-rotate.container` | `tianer-rotate.service` | Platform pod |
-| C05 Ingest Bridge | c05-ingest-bridge.md | `tianer-ingest@.container` | `tianer-ingest@.service` | Capture pod |
+| C05 Ingest Bridge | c05-ingest-bridge.md | `tianer-ingest@.container` | `tianer-ingest@.service` | Platform pod |
 | C06 Gap Detector | c06-gap-detector.md | `tianer-gap-detect.container` | `tianer-gap-detect.service` | Platform pod |
 | C07 Deep Parser | c07-deep-parser.md | `tianer-deep-parse.container` | `tianer-deep-parse.service` | Platform pod |
 | C08 ML Enrichment | c08-ml-enrichment.md | `tianer-ml-classify.container` | `tianer-ml-classify.service` | Platform pod |

@@ -1273,7 +1273,7 @@ All TimescaleDB policies are configured via SQL in the migration files and can b
 
 ### 10.1 Unit Tests — pgTAP Schema Verification
 
-`db/tests/` contains pgTAP-style SQL test files that verify the schema, constraints, and indexes. Each test file runs inside a transaction that rolls back at the end.
+`db/tests/` contains pgTAP-style [5] SQL test files that verify the schema, constraints, and indexes. Each test file runs inside a transaction that rolls back at the end.
 
 | Test File | What It Verifies |
 |-----------|-----------------|
@@ -1315,7 +1315,7 @@ All TimescaleDB policies are configured via SQL in the migration files and can b
 
 ### 10.4 CI Integration
 
-`db/tests/` is run as part of `ci/test-all.sh` (step 5: "SQL migrations smoke: apply all migrations to a fresh DB"). The CI pipeline spins up a PostgreSQL 17 + TimescaleDB container via `ci/docker-compose.yml`, applies migrations, and runs the pgTAP test suite.
+`db/tests/` is run as part of `ci/test-all.sh` (step 5: "SQL migrations smoke: apply all migrations to a fresh DB"). The CI pipeline spins up a PostgreSQL 17 + TimescaleDB container via `ci/docker-compose.yml`, applies migrations, and runs the pgTAP [5] test suite.
 
 ### 10.5 Acceptance Criteria
 
@@ -1602,6 +1602,8 @@ Before considering C02 deployed, verify:
 [3] PostgreSQL Global Development Group. "pg_basebackup." https://www.postgresql.org/docs/17/app-pgbasebackup.html — Documents base backup format options (`-Ft -z` for tar+gzip), WAL method choices (`-X fetch` for simple fetch), and replication connection requirements (§11.6).
 
 [4] PostgreSQL Wiki. "Number Of Database Connections." https://wiki.postgresql.org/wiki/Number_Of_Database_Connections — Documents best practices for connection pooling: performance degrades past the "knee" of optimal connections due to lock contention, context switching, and cache line contention; recommends limiting active connections to `(core_count * 2) + effective_spindle_count` (§2.3).
+
+[5] pgTAP. "pgTAP — Unit Testing for PostgreSQL." https://pgtap.org/ — Documents pgTAP's SQL-based unit testing framework for PostgreSQL: `ok()`, `has_table()`, `has_index()`, `check_test()` assertions, and transactional test execution with automatic rollback (§10.1, §10.4).
 
 ---
 

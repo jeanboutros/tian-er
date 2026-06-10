@@ -1128,17 +1128,17 @@ groups:
 | `test_obs1_metric_name_validation` | Validate Prometheus metric name format | `tianer_host_disk_usage_bytes` → PASS. `tianer host disk` (spaces) → FAIL. `1tianer_metric` (starts with digit) → FAIL. |
 | `test_obs1_label_name_validation` | Validate Prometheus label name format | `mountpoint` → PASS. `Mount Point` (spaces) → FAIL. |
 | `test_atomic_rename_writes_complete_file` | Verify that atomic rename never produces a partial file | Write 1000 lines, `rename()`, read back → all 1000 lines present. Repeat 100×. |
-| `test_textfile_parseable_by_prometheus` | Parse a generated `.prom` file with Prometheus text format parser | `promtool check metrics <file>` exits 0 |
-| `test_alert_rule_syntax` | All alert rules in `prometheus-alerts.yml` are valid PromQL | `promtool check rules prometheus-alerts.yml` exits 0 |
-| `test_prometheus_config_valid` | `prometheus.yml` is valid | `promtool check config prometheus.yml` exits 0 |
+| `test_textfile_parseable_by_prometheus` | Parse a generated `.prom` file with Prometheus text format parser | `promtool check metrics <file>` [10] exits 0 |
+| `test_alert_rule_syntax` | All alert rules in `prometheus-alerts.yml` are valid PromQL | `promtool check rules prometheus-alerts.yml` [10] exits 0 |
+| `test_prometheus_config_valid` | `prometheus.yml` is valid | `promtool check config prometheus.yml` [10] exits 0 |
 
 ### 10.2 Integration Tests
 
 | Test | Description | Acceptance |
 |------|-------------|------------|
-| `test_file_sd_discovers_new_file` | Prometheus discovers a newly created `.prom` file within 35s | File appears in `targets` list within two `refresh_interval` cycles |
+| `test_file_sd_discovers_new_file` | Prometheus [9] discovers a newly created `.prom` file within 35s | File appears in `targets` list within two `refresh_interval` cycles |
 | `test_atomic_rename_not_read_partial` | During a scrape, Prometheus reads a `.prom` file being renamed | Prometheus reads either the old file (complete) or the new file (complete). Never a partial read. Verified by running 1000 scrapes during 1000 renames. |
-| `test_c09_metrics_endpoint_returns_prometheus_format` | C09 `/metrics` returns valid Prometheus text | `curl -s http://127.0.0.1:8080/metrics \| promtool check metrics` exits 0 |
+| `test_c09_metrics_endpoint_returns_prometheus_format` | C09 `/metrics` returns valid Prometheus text [2] | `curl -s http://127.0.0.1:8080/metrics \| promtool check metrics` [10] exits 0 |
 | `test_alert_fires_on_condition` | When `tianer_db_up` drops to 0 for 35s, the alert `TianerDBDown` fires | Alert is `FIRING` in Prometheus alerts API |
 | `test_alert_resolves` | When `tianer_db_up` returns to 1, `TianerDBDown` resolves | Alert state transitions to `INACTIVE` within 1 evaluation interval |
 | `test_promtail_parses_tianer_log` | Promtail correctly extracts `level`, `component`, `sniffer` from a TIANER log line | Labels appear in Loki query results (post-MVP) |
@@ -1439,5 +1439,9 @@ For containers that need write access to this directory (C05 Ingest Bridge, C07 
 [7] Prometheus Community. "node_exporter — Textfile Collector." https://github.com/prometheus/node_exporter#textfile-collector, 2024. Textfile collector pattern: directory of `*.prom` files, atomic write via `.tmp` rename, no timestamps.
 
 [8] Grafana Labs. "Promtail — Pipeline Stages." https://grafana.com/docs/loki/latest/send-data/promtail/stages/, 2024. Promtail log collection agent: pipeline stages for regex, JSON extraction, label assignment, and timestamp parsing.
+
+[9] Prometheus Authors. "Prometheus — Monitoring System and Time Series Database." https://prometheus.io/docs/, 2024. — Documents Prometheus architecture: metric types (counter, gauge, histogram), scrape configuration, service discovery, and alerting engine — the foundational reference for C13's metrics catalogue (§3) and collection architecture (§4).
+
+[10] promtool. "Prometheus CLI Tool — Check Config and Metrics." https://prometheus.io/docs/prometheus/latest/command-line/promtool/ — Documents `promtool` CLI: `check config` for validating `prometheus.yml`, `check rules` for validating alerting rules, and `check metrics` for validating Prometheus text format exposition — used throughout C13's test plan (§10.1, §10.2).
 
 ---

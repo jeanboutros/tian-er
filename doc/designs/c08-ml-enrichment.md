@@ -1394,7 +1394,7 @@ Defaults: `DENSITY_WEIGHT = 0.5`, `WINDOW_WEIGHT = 0.3`, max channel bonus 0.2. 
 
 ## 10. Test Plan
 
-### 10.1 Unit Tests — pytest
+### 10.1 Unit Tests — pytest [5]
 
 | Test File | What It Tests | Key Assertions |
 |-----------|--------------|----------------|
@@ -1447,7 +1447,7 @@ Defaults: `DENSITY_WEIGHT = 0.5`, `WINDOW_WEIGHT = 0.3`, max channel bonus 0.2. 
 
 ### 10.6 CI Integration
 
-C08 tests are run as part of `ci/test-all.sh` step 3 (Python unit tests):
+C08 tests are run as part of `ci/test-all.sh` step 3 (Python unit tests) [5]:
 
 ```bash
 uv run pytest modules/bluetooth/ml-enrichment/tests/ -v --tb=short
@@ -1771,3 +1771,7 @@ flags:           6
 [3] D. Varrazzo and The Psycopg Team. "Psycopg 3 Documentation — Concurrent Operations." https://www.psycopg.org/psycopg3/docs/advanced/async.html, 2024. Psycopg 3.1's `AsyncConnection` and `AsyncCursor` provide the async PostgreSQL interface used in `db.py` (§4.7). The `executemany()` method enables batch INSERT with parameterized queries. §"Asynchronous operations" documents the `async with await psycopg.AsyncConnection.connect()` pattern.
 
 [4] PostgreSQL Global Development Group. "PostgreSQL 17 Documentation: 8.14. JSON Types." https://www.postgresql.org/docs/17/datatype-json.html, 2024. §8.14.3 documents the `@>` containment operator and `||` concatenation operator for JSONB — the latter used by C08 to merge new `enrichment_data` with existing data in `device_summary` via `ON CONFLICT DO UPDATE` (§3.3, §4.7). Also documents the GIN indexing support for JSONB columns used by C09's read path.
+
+[5] pytest. "pytest: helps you write better programs." https://docs.pytest.org/en/stable/, v8.0+. — Documents pytest testing framework: test discovery (`test_*.py` convention), fixture system (`@pytest.fixture` with session/module/function scopes), parametrize decorator, and exception testing with `pytest.raises()` (§10.1, §10.3, §10.6).
+
+[6] MagicStack. "asyncpg — A fast PostgreSQL Database Client Library for Python/asyncio." https://github.com/MagicStack/asyncpg — Documents asyncpg's async connection pool API: `asyncpg.create_pool()`, `pool.acquire()`, `connection.execute()`, and `connection.executemany()` for batch operations — used by C08's `db.py` (§4.7) and integration tests (§10.3).

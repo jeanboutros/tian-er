@@ -1337,7 +1337,7 @@ Update mechanism: `make install` copies files; `systemctl daemon-reload` applies
 
 ## 10. Test Plan
 
-### 10.1 Unit Tests (bats-core)
+### 10.1 Unit Tests (bats-core [7])
 
 | Test | File | Purpose |
 |------|------|---------|
@@ -1348,7 +1348,7 @@ Update mechanism: `make install` copies files; `systemctl daemon-reload` applies
 | Version manifest generation | `deploy/scripts/tests/test_version_manifest.bats` | JSON schema valid |
 | Deploy state file — phase tracking | `deploy/scripts/tests/test_deploy_state.bats` | Phase transitions correct |
 
-### 10.2 Integration Tests (bash)
+### 10.2 Integration Tests (bash [8])
 
 | Test | File | Purpose |
 |------|------|---------|
@@ -1618,3 +1618,7 @@ For offline/disconnected deployments, images can be built on a connected machine
 [5] Astral. "uv sync — Update the Project's Environment." https://docs.astral.sh/uv/reference/cli/#uv-sync, 2024. Documents `uv sync --frozen` (install from lockfile without updating) and `uv lock` (generate hash-pinned lockfile).
 
 [6] npm, Inc. "npm-ci — Clean Install a Project." https://docs.npmjs.com/cli/v11/commands/npm-ci, 2024. Documents `npm ci` (clean install from lockfile) vs `npm install`, requiring `package-lock.json`.
+
+[7] bats-core. "Bash Automated Testing System." https://github.com/bats-core/bats-core, v1.11+. — Documents bats-core test framework for Bash script testing: `.bats` file format, `@test` declarations, `run` helper, status/output assertions, and `setup()`/`teardown()` hooks — used for unit testing of deployment scripts (§10.1).
+
+[8] Free Software Foundation. "GNU Bash Reference Manual." https://www.gnu.org/software/bash/manual/, 2024. — Documents bash scripting: `set -euo pipefail` strict mode, process management, file operations, and exit status conventions used in integration and end-to-end test scripts (§10.2, §10.3).

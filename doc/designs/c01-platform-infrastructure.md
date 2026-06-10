@@ -1067,6 +1067,8 @@ Containers running under rootless Podman with the `tianer` user map their intern
 
 ### 10.1 Unit Tests
 
+All unit tests use bats-core [9] for Bash test automation. Test files in `deploy/scripts/tests/`.
+
 | Test | Description | Acceptance Criteria |
 |------|-------------|---------------------|
 | `test-create-user.sh` | Run `create-user.sh` on a clean system | `id tianer` succeeds; user has correct groups |
@@ -1082,6 +1084,8 @@ Containers running under rootless Podman with the `tianer` user map their intern
 | `test-quadlet-syntax.sh` | Validate all `.container` files | `podman systemd generate` succeeds |
 
 ### 10.2 Integration Tests
+
+Integration tests use bash [10] scripting with `set -euo pipefail` strict mode.
 
 | Test | Description | Acceptance Criteria |
 |------|-------------|---------------------|
@@ -1149,6 +1153,10 @@ C01 does not support automated rollback since it modifies the host OS. Manual ro
 [7] Raspberry Pi Ltd. "Raspberry Pi Computer Hardware — Frequency Management and Thermal Control." https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#frequency-management-and-thermal-control — Documents CM5 SoC thermal throttling threshold at 85°C junction temperature (§2.4).
 
 [8] Shadow-utils project. "useradd(8) — Create a New User or Update Default New User Information." https://man7.org/linux/man-pages/man8/useradd.8.html, shadow-utils 4.19.0 — Documents `--system` (system account), `--home-dir` (login directory), `--shell` (login shell), and `--user-group` (§4.4, §8.4).
+
+[9] bats-core. "Bash Automated Testing System." https://github.com/bats-core/bats-core, v1.11+. — Documents bats-core test framework for Bash script testing: `.bats` test file format, `@test` declarations, `run` helper, status/output assertions, and `setup()`/`teardown()` hooks (§10.1).
+
+[10] Free Software Foundation. "GNU Bash Reference Manual." https://www.gnu.org/software/bash/manual/, 2024. — Documents bash scripting: `set -euo pipefail` strict mode, variable expansion, process substitution, and exit status conventions used in C01 scripts (§10.1, §10.2).
 
 ---
 

@@ -231,11 +231,13 @@ At 300K rows per sniffer buffer, memory usage is approximately 300,000 × 60 = *
 
 ### 4.1 parse_line() State Machine
 
-`parse_line()` implements a single-pass tokenizer over `std::string_view`, avoiding heap allocations for string splitting. The INGEST-1 contract defines exactly 7 pipe-delimited fields:
+`parse_line()` implements a single-pass tokenizer over `std::string_view`, avoiding heap allocations for string splitting. The INGEST-1 contract defines exactly 7 pipe-delimited fields (see also C03 §4.3.1 and §5.2 — CAPTURE-2, which is the producer side of this same schema):
 
 ```
 <epoch_sec>.<frac>|<mac>|<addr_type>|<rssi>|<channel>|<pdu_type>|<advdata_hex>
 ```
+
+The sniffer name is not present in the line — it is injected as `sniffer_id` by the `PgWriter` constructor (§4.3) and mapped to the `raw_packets.sniffer_id` column (§3.2).
 
 The parser walks the string character-by-character, extracting each field into the corresponding `Packet` member. A state machine ensures exactly 7 fields are present.
 
@@ -478,9 +480,11 @@ int main(int argc, char* argv[]) {
 
 ### 5.1 INGEST-1: Normalized tshark Input Schema
 
-**Source:** C03 Capture Pipeline (tshark wrapper)
+**Source:** C03 Capture Pipeline (tshark wrapper, §4.3.1 and §5.2 — CAPTURE-2 contract)
 **Consumer:** C05 Ingest Bridge
 **Transport:** Named FIFO at `/var/run/tianer/<name>-ingest.fifo` (V03), one per sniffer
+
+This schema is the consumer-side specification of the CAPTURE-2 / INGEST-1 contract. The producer side is documented in C03 §4.3.1 and §5.2. Both sides agree on exactly 7 pipe-delimited fields.
 
 ```
 <epoch_seconds>.<fractional>|<mac_address>|<address_type>|<rssi>|<channel>|<pdu_type>|<advdata_hex>
@@ -747,7 +751,7 @@ The `%i` template expands to the sniffer name (e.g. `ubertooth0`), enabling per-
 
 ## 10. Test Plan
 
-### 10.1 Unit Tests (GoogleTest)
+### 10.1 Unit Tests (GoogleTest [6])
 
 | Test Suite | Test Case | File | Acceptance Criteria |
 |-----------|-----------|------|---------------------|
@@ -1030,3 +1034,5 @@ Before considering C05 deployed, verify:
 [4] cppreference.com. "std::optional — C++17." https://en.cppreference.com/w/cpp/utility/optional, 2024. Documents the C++17 `std::optional<T>` class template — a type-safe vocabulary type for "value or absence" that is the primary pattern used in `parse_line()` return values, `Packet` struct nullable fields (§3.1), and column mappings (§3.2).
 
 [5] J. T. Vermeulen. "libpqxx — The Official C++ Client API for PostgreSQL, Release 7.8.1." https://github.com/jtv/libpqxx/releases/tag/7.8.1, 2024. The `pqxx::stream_to` class, used in `PgWriter` (§4.3), provides a stream-based interface for the PostgreSQL COPY protocol, handling escaping internally and eliminating SQL injection surface.
+
+[6] Google. "GoogleTest — Google Testing and Mocking Framework." https://google.github.io/googletest/, v1.14. — Documents GoogleTest C++ testing framework: `TEST()` and `TEST_F()` macros, `EXPECT_*` and `ASSERT_*` assertion families, test fixture setup/teardown, and `ctest` integration via CMake's `enable_testing()` and `add_test()` (§10.1).

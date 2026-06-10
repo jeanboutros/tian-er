@@ -257,7 +257,7 @@ Each file is a valid PCAP savefile per the libpcap file format [5]:
 | 0x08 | 4 | Reserved1 | 0 |
 | 0x0C | 4 | Reserved2 | 0 |
 | 0x10 | 4 | Snapshot length | 256 (BLE advertising packets fit in 47 bytes max) |
-| 0x14 | 4 | Link-layer type | 251 (Ubertooth) or 195 (nRF52840 Sniffer) |
+| 0x14 | 4 | Link-layer type | 256 (Ubertooth) or 272 (nRF52840 Sniffer) |
 
 **Per-packet header (16 octets):**
 
@@ -768,7 +768,7 @@ The default level 3 is recommended for the CM5. At 1000 pps and 30-minute rotati
 
 ### 10.1 Unit Tests
 
-Tested with bats-core. Test files in `modules/bluetooth/rotation/tests/`.
+Tested with bats-core [11]. Test files in `modules/bluetooth/rotation/tests/`.
 
 | Test Suite | File | Scope |
 |-----------|------|-------|
@@ -999,3 +999,7 @@ sudo -u tianer BLESNIFF_ROTATION_MINUTES=9999 /usr/local/lib/tianer/rotate-pcap.
 [9] Linux Foundation. "Filesystem Hierarchy Standard 3.0 — §5.8 /var/lib : Variable state information." https://refspecs.linuxfoundation.org/FHS_3.0/fhs/ch05s08.html. "This hierarchy holds state information pertaining to an application or the system. State information is data that programs modify while they run, and that pertains to one specific host."
 
 [10] Linux Foundation. "Filesystem Hierarchy Standard 3.0 — §5.1 /var : Variable data." https://refspecs.linuxfoundation.org/FHS_3.0/fhs/ch05.html. "/var contains variable data files. This includes spool directories and files, administrative and logging data, and transient and temporary files."
+
+[11] bats-core. "Bash Automated Testing System." https://github.com/bats-core/bats-core, v1.11+. — Documents bats-core test framework: `.bats` test file format, `@test` declarations, `run` helper, assertion helpers (`[ "$status" -eq 0 ]`, `[ "$output" = "..." ]`), and `setup()`/`teardown()` hooks (§10.1).
+
+[12] Free Software Foundation. "GNU Bash Reference Manual." https://www.gnu.org/software/bash/manual/, 2024. — Documents bash scripting: `set -euo pipefail` strict mode, signal handling (`trap`), process management (`kill -0` PID validation), and file operations used in rotation scripts (§10.1, §10.2).
