@@ -72,7 +72,7 @@ This document implements the following resolved decisions from ADR-0001:
 | Heartbeat: local file primary (`/var/lib/tianer/heartbeat/<name>.ts`), DB secondary | D-11 | §4.4: heartbeat companion |
 | nRF USB PID 1915:522A (sniffer) + 1915:520f (DFU) | D-03 | §2.3: per-DLT handling |
 | Persistent udev device symlinks `/dev/tianer/*` | Q4 | §11.2: USB passthrough |
-| BLE advertising channels 37/38/39 (2402/2426/2480 MHz) | inception | §2.4: channel selection |
+| BLE advertising channels 37/38/39 (2402/2426/2480 MHz) [1] | inception | §2.4: channel selection |
 | Container orchestration with `--cap-drop ALL` except C03 | Q1, storage-strategy | §11.1: Quadlet unit files |
 
 ---
@@ -142,15 +142,17 @@ Capture pipeline instances are parameterised at launch by the sniffer's **Data L
 
 | Sniffer Type | DLT | DLT Name | tshark Protocol Namespace | Hardware |
 |-------------|-----|----------|--------------------------|----------|
-| Ubertooth One | 251 | `LINKTYPE_BLUETOOTH_LE_LL_WITH_PHDR` | `btle_rf.*`, `btle_le.*` | LPC175x + CC2400 |
-| nRF52840 Sniffer | 195 | Nordic BLE Sniffer Link Layer | `nordic_ble.*` | nRF52840 ARM Cortex-M4 |
+| Ubertooth One | 256 | `LINKTYPE_BLUETOOTH_LE_LL_WITH_PHDR` | `btle_rf.*`, `btle_le.*` | LPC175x + CC2400 |
+| nRF52840 Sniffer | 272 | `LINKTYPE_NORDIC_BLE` | `nordic_ble.*` | nRF52840 ARM Cortex-M4 |
 
-**DLT 251 (Ubertooth) characteristics:**
+DLT values are assigned by tcpdump.org [2].
+
+**DLT 256 (Ubertooth) characteristics:**
 - Includes RF physical-layer metadata: channel, signal power, noise power, reference access address, CRC status, error count
 - Link-layer fields: access address, PDU header, payload, CRC
 - The `btle_rf` header provides per-packet signal quality that the nRF sniffer does not expose in its PCAP output
 
-**DLT 195 (nRF) characteristics:**
+**DLT 272 (nRF) characteristics:**
 - Includes board metadata: board ID, packet counter, timestamp
 - RF metadata: RSSI (Received Signal Strength Indicator), channel
 - Link-layer fields: access address, PDU header, payload, CRC
@@ -160,7 +162,7 @@ Capture pipeline instances are parameterised at launch by the sniffer's **Data L
 
 ### 2.4 BLE Channel Selection
 
-BLE advertising uses three physical channels in the 2.4 GHz ISM band:
+BLE advertising uses three physical channels in the 2.4 GHz ISM band [1]:
 
 | BLE Channel | Frequency | Purpose |
 |-------------|-----------|---------|
@@ -170,7 +172,7 @@ BLE advertising uses three physical channels in the 2.4 GHz ISM band:
 
 Ubertooth One is a **single-channel-at-a-time** device. It can monitor exactly one channel per capture session. The default channel is **37** (2402 MHz) per D-05 and Q6. The channel is configurable per sniffer in `sniffers.yaml`.
 
-The nRF52840 Sniffer firmware supports **channel hopping** across all three advertising channels. When an nRF dongle is configured with multiple channels in `sniffers.yaml`, the sniffer firmware hops between them, capturing packets from all three.
+The nRF52840 Sniffer firmware supports **channel hopping** across all three advertising channels [4]. When an nRF dongle is configured with multiple channels in `sniffers.yaml`, the sniffer firmware hops between them, capturing packets from all three.
 
 **Channel coverage strategy:** With one Ubertooth (single channel, default ch37) and one nRF dongle (hopping ch37/38/39), the platform achieves coverage of all three advertising channels simultaneously. Deduplication of packets seen on multiple channels is handled at query time in the database (D-05, D-10), not at capture time.
 
@@ -354,7 +356,7 @@ Each sniffer writes to a dedicated subdirectory under V02:
 
 **Current file naming:** The sniffer always writes to `capture.pcap` in its directory. C04 rotation renames this file to a timestamped name and the sniffer wrapper creates a new `capture.pcap` (see §3.5 for rotation coordination).
 
-**DLT embedded in PCAP:** The Global Header of each PCAP file records the DLT value (251 for Ubertooth, 195 for nRF). This is set by the sniffer tool and verified at startup.
+**DLT embedded in PCAP:** The Global Header of each PCAP file records the DLT value (256 for Ubertooth, 272 for nRF). This is set by the sniffer tool and verified at startup.
 
 ### 3.5 Rotation Coordination with C04
 
@@ -378,7 +380,7 @@ Each sniffer type has a dedicated wrapper script that handles hardware initialis
 
 ```bash
 #!/usr/bin/env bash
-# ubertooth-wrap.sh — Capture BLE advertising from Ubertooth One (DLT 251)
+# ubertooth-wrap.sh — Capture BLE advertising from Ubertooth One (DLT 256)
 # Invoked by Quadlet container. Reads config from environment.
 
 set -euo pipefail
@@ -393,14 +395,14 @@ PCAP_FILE="${PCAP_DIR}/capture.pcap"
 mkdir -p "${PCAP_DIR}"
 
 # Capture BLE advertising on specified channel.
-# ubertooth-btle -A 37 captures advertising on channel 37.
+# ubertooth-btle -A 37 captures advertising on channel 37 [5].
 # Output is PCAP to stdout; redirected to file.
 # The -c flag specifies the capture file directly in some versions.
 exec ubertooth-btle -U "${SNIFFER_DEVICE}" -c "${PCAP_FILE}" -A "${CHANNEL}"
 ```
 
 **Key behaviours:**
-- `ubertooth-btle` writes PCAP with DLT 251 directly to the specified file.
+- `ubertooth-btle` writes PCAP with DLT 256 directly to the specified file.
 - Channel is passed as a command-line argument from `sniffers.yaml`.
 - On SIGTERM/SIGHUP, ubertooth-btle exits cleanly. The wrapper script traps the signal, ensuring a clean PCAP file closure.
 - If the device is not present, `ubertooth-btle` exits with an error; Podman restarts the container per `Restart=on-failure`.
@@ -409,7 +411,7 @@ exec ubertooth-btle -U "${SNIFFER_DEVICE}" -c "${PCAP_FILE}" -A "${CHANNEL}"
 
 ```bash
 #!/usr/bin/env bash
-# nrf-wrap.sh — Capture BLE from nRF52840 Sniffer (DLT 195)
+# nrf-wrap.sh — Capture BLE from nRF52840 Sniffer (DLT 272)
 # Invoked by Quadlet container. Reads config from environment.
 
 set -euo pipefail
@@ -422,7 +424,7 @@ PCAP_FILE="${PCAP_DIR}/capture.pcap"
 
 mkdir -p "${PCAP_DIR}"
 
-# nRF Sniffer uses nrfutil (Nordic command-line tool).
+# nRF Sniffer uses nrfutil (Nordic command-line tool) [4].
 # The sniffer can hop across multiple BLE advertising channels.
 # Output is PCAP to specified file.
 exec nrfutil ble-sniffer \
@@ -432,7 +434,7 @@ exec nrfutil ble-sniffer \
 ```
 
 **Key behaviours:**
-- `nrfutil ble-sniffer` writes PCAP with DLT 195.
+- `nrfutil ble-sniffer` writes PCAP with DLT 272.
 - Channels are comma-separated; the firmware hops between them.
 - PID detection: `nrfutil` auto-detects whether the dongle is in sniffer mode (PID 522A) or DFU mode (PID 520f). If in DFU mode, the wrapper logs a warning and exits with a non-zero code — the operator must flash the sniffer firmware.
 
@@ -476,44 +478,51 @@ exec tail -c +0 -F "${PCAP_FILE}" > "${FIFO_PATH}"
 
 The tshark wrapper reads raw PCAP from a FIFO and produces normalised pipe-delimited output to the ingest FIFO. It is **parameterised at launch** with the sniffer's DLT type so that it uses the correct tshark field names.
 
-#### 4.3.1 Normalised Output Schema
+#### 4.3.1 Normalised Output Schema (CAPTURE-2 / INGEST-1)
 
-Regardless of source DLT, tshark-wrap produces output lines in this format:
+Regardless of source DLT, tshark-wrap produces output lines in this format after post-processing (see §4.3.2 for per-DLT field extraction and post-processing pipeline):
 
 ```
-<epoch_seconds>.<microseconds>|<sniffer_name>|<channel>|<access_address>|<pdu_header>|<rssi>|<payload_hex>|<payload_length>|<crc_hex>
+<epoch_seconds>.<microseconds>|<mac_address>|<addr_type>|<rssi>|<channel>|<pdu_type>|<advdata_hex>
 ```
+
+This 7-field normalized schema matches the INGEST-1 contract consumed by the ingest bridge (C05 §5.1). The sniffer name is not included in the line — it is injected by the ingest bridge's `PgWriter` constructor as the `sniffer_id` per C05 §3.2.
 
 **Fields:**
 
 | Position | Name | Type | Description |
 |----------|------|------|-------------|
-| 1 | `ts` | float | Frame arrival timestamp as epoch seconds with microsecond precision |
-| 2 | `sniffer_name` | string | Sniffer instance name (ut1, nrf1, nrf2, nrf3) |
-| 3 | `channel` | int | BLE advertising channel (37, 38, or 39) |
-| 4 | `access_address` | hex string | BLE access address (4 bytes, e.g., `8e89bed6`) |
-| 5 | `pdu_header` | hex string | BLE PDU header (2 bytes) |
-| 6 | `rssi` | int | Received Signal Strength Indicator in dBm |
-| 7 | `payload_hex` | hex string | PDU payload as hex (0–37 bytes for BLE advertising) |
-| 8 | `payload_length` | int | Byte length of the payload |
-| 9 | `crc_hex` | hex string | CRC-24 value as hex (3 bytes) |
+| 1 | `ts` | float | Frame arrival timestamp as epoch seconds with microsecond precision (from `frame.time_epoch`) |
+| 2 | `mac_address` | colon-hex string (17 chars) | BLE advertiser MAC address (e.g., `aa:bb:cc:dd:ee:ff`). Empty for non-ADV packets. |
+| 3 | `addr_type` | `0` or `1` | Address type extracted from the PDU header TxAdd bit: `0` = public, `1` = random. Empty if not determinable. |
+| 4 | `rssi` | int | Received Signal Strength Indicator in dBm. Empty if not reported. |
+| 5 | `channel` | int | BLE advertising channel (37, 38, or 39). Empty if not reported. |
+| 6 | `pdu_type` | int | BLE PDU type extracted from the PDU header low nibble: 0=ADV_IND, 1=ADV_DIRECT_IND, 2=ADV_NONCONN_IND, 3=SCAN_REQ, 4=SCAN_RSP, 5=CONNECT_IND, 6=ADV_SCAN_IND. Empty if not determinable. |
+| 7 | `advdata_hex` | hex string (even length) | Raw advertising data payload, hex-encoded. Up to 62 hex chars (31 bytes) for legacy BLE advertising. Empty string if none. |
 
-**Example output line (Ubertooth, DLT 251):**
+**Example output line (Ubertooth, DLT 256):**
 ```
-1749472501.234567|ut1|37|8e89bed6|0206|-48|0201060303e1ff0c|9|a1b2c3
+1749472501.234567|aa:bb:cc:dd:ee:ff|0|-48|37|0|0201060303e1ff0c0948656c6c6f576f726c64
 ```
 
-**Example output line (nRF, DLT 195):**
+**Example output line (nRF, DLT 272):**
 ```
-1749472501.345678|nrf1|38|8e89bed6|0206|-52|0201060303e1ff0c|9|a1b2c3
+1749472501.345678|aa:bb:cc:dd:ee:ff|1|-52|38|0|0201060303e1ff0c0948656c6c6f576f726c64
 ```
 
-#### 4.3.2 Per-DLT tshark Invocation
+**Empty-field convention:** When a field is not available (e.g., `rssi` for a non-ADV packet or `mac_address` missing), it appears as an empty string between pipes: `||`. All fields except `ts` allow empty. This convention matches the INGEST-1 contract (C05 §5.1).
+
+#### 4.3.2 Per-DLT tshark Invocation with Post-Processing
+
+tshark is configured per DLT to extract raw fields, which are then post-processed into the 7-field normalised schema (§4.3.1). The post-processing extracts `addr_type` and `pdu_type` from the PDU header byte, converts the access address to colon-hex MAC format, and discards fields not needed by the ingest bridge (payload length, CRC, sniffer name).
 
 ```bash
 #!/usr/bin/env bash
-# tshark-wrap.sh — Parameterised tshark reader.
+# tshark-wrap.sh — Parameterised tshark reader with post-processing.
 # Invoked with BLESNIFF_DLT and BLESNIFF_SNIFFER_NAME from environment.
+#
+# Output: 7-field pipe-delimited normalised schema per CAPTURE-2 / INGEST-1:
+#   ts|mac_address|addr_type|rssi|channel|pdu_type|advdata_hex
 
 set -euo pipefail
 
@@ -523,42 +532,39 @@ PCAP_FIFO="/var/run/tianer/${SNIFFER_NAME}.fifo"
 INGEST_FIFO="/var/run/tianer/${SNIFFER_NAME}-ingest.fifo"
 
 # tshark field expressions vary by DLT.
-# Each DLT mapping is a function that returns the -e flags.
-if [[ "${DLT}" == "251" ]]; then
-    # Ubertooth One — DLT 251: LINKTYPE_BLUETOOTH_LE_LL_WITH_PHDR
+if [[ "${DLT}" == "256" ]]; then
+    # Ubertooth One — DLT 256: LINKTYPE_BLUETOOTH_LE_LL_WITH_PHDR [2]
     TSHARK_FIELDS=(
         -e frame.time_epoch
-        -e btle_rf.channel
-        -e btle_le.access_address
-        -e btle_le.packet_header
+        -e btle_le.advertising_address
+        -e btle_le.advertising_header
         -e btle_rf.signal_power
+        -e btle_rf.channel
         -e btle_le.data
-        -e btle_le.data.len
-        -e btle_le.crc
     )
-elif [[ "${DLT}" == "195" ]]; then
-    # nRF52840 Sniffer — DLT 195: Nordic BLE Sniffer Link Layer
+elif [[ "${DLT}" == "272" ]]; then
+    # nRF52840 Sniffer — DLT 272: LINKTYPE_NORDIC_BLE [2]
     TSHARK_FIELDS=(
         -e frame.time_epoch
-        -e nordic_ble.channel
-        -e nordic_ble.access_address
+        -e nordic_ble.advertiser_address
         -e nordic_ble.packet_header
         -e nordic_ble.rssi
+        -e nordic_ble.channel
         -e nordic_ble.payload
-        -e nordic_ble.payload.length
-        -e nordic_ble.crc
     )
 else
     echo "TIANER | {\"ts\":\"$(date -Iseconds)\",\"level\":\"FATAL\",\"component\":\"tshark\",\"msg\":\"Unsupported DLT\",\"dlt\":\"${DLT}\"}" >&2
     exit 1
 fi
 
-# Run tshark reading from the PCAP FIFO.
+# Run tshark reading from the PCAP FIFO, piping through post-processing.
 # -i -: read from stdin (FIFO)
 # -l: flush output after each packet (critical for real-time pipeline)
-# -T fields: output only the requested fields
+# -T fields: output only the requested fields [3]
 # -E separator=\|: pipe-delimited output
-exec tshark \
+# -E quote=n: no quoting of field values
+# -E occurrence=f: for multi-occurrence fields, use the first occurrence
+tshark \
     -i - \
     -l \
     -T fields \
@@ -567,25 +573,91 @@ exec tshark \
     -E occurrence=f \
     "${TSHARK_FIELDS[@]}" \
     < "${PCAP_FIFO}" \
+    | awk -F'|' '
+    # Post-processing pipeline: convert raw tshark fields to CAPTURE-2 7-field schema.
+    # Input:   ts|address_raw|header_byte|rssi|channel|advdata_hex
+    # Output:  ts|mac_address|addr_type|rssi|channel|pdu_type|advdata_hex
+    {
+        ts         = $1   # epoch seconds with microsecond precision
+        addr_raw   = $2   # raw address (e.g., "aa:bb:cc:dd:ee:ff" or hex string without colons)
+        header_hex = $3   # PDU header as hex byte (2 hex chars)
+        rssi       = $4
+        channel    = $5
+        advdata    = $6   # hex-encoded advertising payload
+
+        # Convert address to canonical colon-hex if needed.
+        # If already colon-separated, keep as-is. Otherwise insert colons.
+        mac_address = addr_raw
+        if (addr_raw !~ /:/ && length(addr_raw) >= 12) {
+            mac_address = substr(addr_raw,1,2) ":" substr(addr_raw,3,2) ":" \
+                          substr(addr_raw,5,2) ":" substr(addr_raw,7,2) ":" \
+                          substr(addr_raw,9,2) ":" substr(addr_raw,11,2)
+        }
+
+        # Extract addr_type and pdu_type from the PDU header byte.
+        # The advertising channel PDU header byte 0 (BLE Core Spec Vol 6, Part B, §2.3):
+        #   Bits [3:0]: PDU Type (low nibble)
+        #   Bit  [4]:   RFU (reserved)
+        #   Bit  [5]:   ChSel (channel selection)
+        #   Bit  [6]:   TxAdd (0=public, 1=random address)
+        #   Bit  [7]:   RxAdd (target address type)
+        # tshark outputs the header as a hex byte in network order.
+        # The hex byte's bit positions correspond directly: PDU type is the
+        # low nibble (0x0F mask), TxAdd is bit 6 (0x40 mask).
+        addr_type = ""
+        pdu_type  = ""
+        if (length(header_hex) >= 2) {
+            cmd = "printf \"%d\" 0x" header_hex
+            cmd | getline header_val
+            close(cmd)
+            addr_type = and(header_val, 0x40) ? "1" : "0"   # Bit 6 = TxAdd
+            pdu_type  = and(header_val, 0x0F)                # Low nibble = PDU type
+        }
+
+        printf "%s|%s|%s|%s|%s|%s|%s\n", ts, mac_address, addr_type, rssi, channel, pdu_type, advdata
+    }' \
     > "${INGEST_FIFO}"
 ```
+
+**PDU Header Bit Extraction Details:**
+
+The BLE advertising channel PDU header is 2 bytes (16 bits) per the Bluetooth Core Specification Vol 6, Part B, §2.3 [1]. tshark outputs this header as a hex byte string (2 or 4 hex chars depending on DLT). The PDU type and address type are extracted from the **first header byte** (byte 0):
+
+```
+Advertising Channel PDU Header, Byte 0:
+  Bit 7:   RxAdd   (target address type: 0=public, 1=random)
+  Bit 6:   TxAdd   (advertiser address type: 0=public, 1=random)
+  Bit 5:   ChSel   (channel selection algorithm)
+  Bit 4:   RFU     (reserved for future use)
+  Bits 3-0: PDU Type (0=ADV_IND, 1=ADV_DIRECT_IND, 2=ADV_NONCONN_IND,
+                       3=SCAN_REQ, 4=SCAN_RSP, 5=CONNECT_IND, 6=ADV_SCAN_IND)
+```
+
+The post-processing pipeline extracts:
+- `addr_type` from bit 6 (TxAdd): `(header_val & 0x40) ? "1" : "0"`
+- `pdu_type` from the low nibble bits [3:0]: `header_val & 0x0F`
+
+This matches the ADR-0001 example: an `ADV_NONCONN_IND` (PDU type 2) with random address (TxAdd=1) produces header byte `0x42` (0x40 | 0x02), giving `addr_type=1, pdu_type=2`.
+
+For data channel PDUs (not advertising), the header format differs; the pipeline attempts extraction regardless, with unexpected values producing empty fields that the ingest bridge handles as `std::nullopt`.
 
 **Key behaviours:**
 - `-l` (flush after each packet): Mandatory for real-time pipeline. Without it, tshark buffers output, causing ingest latency proportional to buffer size.
 - `-E separator=\|`: Pipe-delimited output matches the CAPTURE-2 contract expected by the ingest bridge.
 - `-E quote=n`: No quoting of field values — simplifies parser in C05.
 - `-E occurrence=f`: For fields that may appear multiple times per packet (unlikely in BLE advertising), use the first occurrence.
-- tshark reads from `stdin` redirected from the PCAP FIFO and writes `stdout` to the ingest FIFO.
+- tshark reads from `stdin` redirected from the PCAP FIFO and pipes through `awk` post-processing to the ingest FIFO.
+- Post-processing in `awk` provides zero-allocation, line-at-a-time transformation without buffering — suitable for the real-time hot path.
 - If the input FIFO has no writer (e.g., sniffer not yet started), tshark blocks on the open syscall until tail-feed writes the first byte.
 
 #### 4.3.3 DLT Determination
 
 The DLT value is determined at container startup:
 
-1. The Quadlet `.container` file specifies `BLESNIFF_DLT=251` or `BLESNIFF_DLT=195` via `Environment=` or `EnvironmentFile`.
+1. The Quadlet `.container` file specifies `BLESNIFF_DLT=256` or `BLESNIFF_DLT=272` via `Environment=` or `EnvironmentFile`.
 2. The DLT value is derived from the sniffer's `type` field in `sniffers.yaml`:
-   - `type: ubertooth` → DLT 251
-   - `type: nrf` → DLT 195
+   - `type: ubertooth` → DLT 256
+   - `type: nrf` → DLT 272
 3. A startup validation step reads the PCAP global header from the current file and verifies the DLT matches the configured value. If there is a mismatch, the wrapper logs a FATAL error and exits, preventing data corruption downstream.
 
 ### 4.4 Heartbeat Companion
@@ -613,6 +685,21 @@ DB_NAME="${TIANER_DB_NAME:-tianer}"
 DB_USER="${BLESNIFF_DB_USER:-tianer_writer}"
 DB_PASSWORD_FILE="${BLESNIFF_DB_PASSWORD_FILE:-/etc/tianer/secrets/db_password}"
 
+# Resolve sniffer_id from the sniffers table (once at startup).
+# The sniffer_heartbeat table uses sniffer_id (SMALLINT PK) per C02 §3.8,
+# so we must map sniffer_name → sniffer_id before writing heartbeats.
+SNIFFER_ID=""
+if command -v psql >/dev/null 2>&1; then
+    SNIFFER_ID=$(PGPASSWORD="$(cat "${DB_PASSWORD_FILE}" 2>/dev/null || true)" \
+        psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" -d "${DB_NAME}" \
+            -t -A -c "SELECT sniffer_id FROM bluetooth.sniffers WHERE name = '${SNIFFER_NAME}';" \
+            2>/dev/null || true)
+fi
+
+if [[ -z "${SNIFFER_ID}" ]]; then
+    echo "TIANER | {\"ts\":\"$(date -Iseconds)\",\"level\":\"WARN\",\"component\":\"heartbeat\",\"sniffer\":\"${SNIFFER_NAME}\",\"msg\":\"Could not resolve sniffer_id from sniffers table (DB may be down or sniffer not registered)\"}" >&2
+fi
+
 while true; do
     EPOCH_TS="$(date +%s)"
 
@@ -621,13 +708,14 @@ while true; do
         echo "TIANER | {\"ts\":\"$(date -Iseconds)\",\"level\":\"ERROR\",\"component\":\"heartbeat\",\"sniffer\":\"${SNIFFER_NAME}\",\"msg\":\"Heartbeat file write failed\"}" >&2
     fi
 
-    # Secondary: Database (best-effort; do NOT block the heartbeat loop)
-    if command -v psql >/dev/null 2>&1; then
+    # Secondary: Database (best-effort; do NOT block the heartbeat loop).
+    # Uses sniffer_id (PK), ts, status per C02 §3.8 schema.
+    if [[ -n "${SNIFFER_ID}" ]] && command -v psql >/dev/null 2>&1; then
         PGPASSWORD="$(cat "${DB_PASSWORD_FILE}" 2>/dev/null || true)" \
         psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" -d "${DB_NAME}" \
-            -c "INSERT INTO bluetooth.sniffer_heartbeat (sniffer_name, last_beat_ts)
-                VALUES ('${SNIFFER_NAME}', to_timestamp(${EPOCH_TS}))
-                ON CONFLICT (sniffer_name) DO UPDATE SET last_beat_ts = to_timestamp(${EPOCH_TS})" \
+            -c "INSERT INTO bluetooth.sniffer_heartbeat (sniffer_id, ts, status)
+                VALUES (${SNIFFER_ID}, NOW(), 'running')
+                ON CONFLICT (sniffer_id) DO UPDATE SET ts = NOW(), status = 'running'" \
             >/dev/null 2>&1 || \
             echo "TIANER | {\"ts\":\"$(date -Iseconds)\",\"level\":\"WARN\",\"component\":\"heartbeat\",\"sniffer\":\"${SNIFFER_NAME}\",\"msg\":\"DB heartbeat write failed (DB may be down)\"}" >&2
     fi
@@ -637,7 +725,9 @@ done
 ```
 
 **Key behaviours:**
+- **sniffer_id resolution at startup:** On first tick, the script resolves the sniffer's `sniffer_id` from the `bluetooth.sniffers` table using the `BLESNIFF_SNIFFER_NAME` value. This maps the human-readable name to the numeric `sniffer_id` used as the PK in `sniffer_heartbeat` (per C02 §3.8). If the lookup fails (DB down, sniffer not yet registered), the script logs a WARN and skips DB heartbeat writes until the next restart — the local file heartbeat remains unaffected.
 - **Primary path always first:** The local file write is attempted before the DB write. If the filesystem is writable, the heartbeat always updates.
+- **DB heartbeat uses C02 schema columns:** The INSERT uses `sniffer_id` (SMALLINT PK), `ts` (TIMESTAMPTZ), and `status` (TEXT, value `'running'`). The `ON CONFLICT (sniffer_id)` upsert matches the C02 §3.8 PK definition.
 - **DB path is best-effort:** DB write failures are logged at WARN level and do not block the loop. The heartbeat interval is not disrupted by DB outages.
 - **On DB recovery:** The gap detector (C06) backfills the `bluetooth.sniffer_heartbeat` table from the local heartbeat file timestamps.
 - **Interval jitter:** The `sleep` interval is a fixed 30 seconds (no jitter), producing a predictable heartbeat cadence for gap detection.
@@ -694,19 +784,19 @@ All wrapper scripts follow a consistent error handling pattern:
 | **From** | Sniffer wrapper (ubertooth-wrap.sh or nrf-wrap.sh) |
 | **To** | PCAP file on V02 (`/var/lib/tianer/pcap/<name>/capture.pcap`) |
 | **Format** | Binary PCAP (libpcap 1.10 format) |
-| **DLT** | 251 (Ubertooth One: `LINKTYPE_BLUETOOTH_LE_LL_WITH_PHDR`) or 195 (nRF52840 Sniffer: Nordic BLE Sniffer Link Layer) |
+| **DLT** | 256 (Ubertooth One: `LINKTYPE_BLUETOOTH_LE_LL_WITH_PHDR`) or 272 (nRF52840 Sniffer: `LINKTYPE_NORDIC_BLE`) |
 | **Transport** | Regular file write to V02 bind-mount |
 | **Guarantees** | Zero data loss from hardware to disk. Sniffer writes only to disk, never to a FIFO. Write failures are fatal — the sniffer exits and triggers a container restart. |
 | **Rotation contract** | The sniffer wrapper responds to SIGHUP by closing and reopening the PCAP file (coordinates with C04 ROTATION-1). |
 | **Metadata** | PCAP global header records: DLT, snapshot length (256 bytes for BLE advertising), endianness (little-endian on ARM64). Per-packet headers record: timestamp (seconds + microseconds), captured length, original length. |
 
-**DLT 251 packet structure (Ubertooth One):**
+**DLT 256 packet structure (Ubertooth One):**
 ```
 [RF metadata header: 6 fields]
 [BTLE Link Layer: access_address (4) + PDU header (2) + payload (0-37) + CRC (3)]
 ```
 
-**DLT 195 packet structure (nRF52840 Sniffer):**
+**DLT 272 packet structure (nRF52840 Sniffer):**
 ```
 [Nordic BLE metadata header: board_id + counter + flags + channel + RSSI + event_counter + timestamp + delta + ...]
 [BTLE Link Layer: access_address + PDU header + payload + CRC]
@@ -714,18 +804,21 @@ All wrapper scripts follow a consistent error handling pattern:
 
 ### 5.2 CAPTURE-2 — tshark to Ingest Bridge
 
+This contract is the C03 producer side of **INGEST-1** (C05 §5.1). The two contracts describe the same schema from the producer and consumer perspectives, respectively.
+
 | Property | Value |
 |----------|-------|
 | **Contract ID** | CAPTURE-2 |
-| **From** | tshark-wrap.sh (per-DLT parameterised tshark) |
+| **From** | tshark-wrap.sh (per-DLT parameterised tshark with awk post-processing) |
 | **To** | Ingest bridge (C05), via ingest FIFO on V03 |
 | **Format** | Pipe-delimited (`|`) text lines, one per BLE packet |
 | **Transport** | Named FIFO (`/var/run/tianer/<name>-ingest.fifo`), mode 0660, owner `tianer:tianer` |
 | **Line encoding** | UTF-8, no quoting, no escaping. Newline (`\n`) terminates each record. |
-| **Schema** | 9 pipe-separated fields: `ts|sniffer_name|channel|access_address|pdu_header|rssi|payload_hex|payload_length|crc_hex` |
-| **Field types** | See §4.3.1 normalised output schema |
-| **Normalisation guarantee** | Fields are in a consistent order and format regardless of source DLT. The per-DLT mapping in tshark-wrap.sh ensures the ingest bridge never receives DLT-specific field names. |
-| **Missing fields** | Fields not present in a given packet are output as empty strings (e.g., `||-52|`) — the ingest bridge treats empty strings as NULL. |
+| **Schema** | 7 pipe-separated fields: `ts|mac_address|addr_type|rssi|channel|pdu_type|advdata_hex` |
+| **Consumer contract** | Mirrors INGEST-1 (C05 §5.1). The ingest bridge is the authoritative consumer of this schema. |
+| **Normalisation guarantee** | Fields are in a consistent order and format regardless of source DLT. The per-DLT mapping and awk post-processing pipeline in tshark-wrap.sh ensures the ingest bridge never receives DLT-specific field names or raw PDU header bytes. |
+| **Missing fields** | Fields not present in a given packet are output as empty strings (e.g., `||-52|`) — the ingest bridge treats empty strings as `std::nullopt` per INGEST-1. |
+| **sniffer_name exclusion** | The sniffer name is **not** included in the line. It is injected by the ingest bridge's `PgWriter` constructor as `sniffer_id` (C05 §3.2). This eliminates redundant per-line data. |
 | **Replaces** | CONTRACT 8.4-A from inception document |
 
 ### 5.3 CAPTURE-3 — Heartbeat Protocol
@@ -736,7 +829,7 @@ All wrapper scripts follow a consistent error handling pattern:
 | **From** | Heartbeat companion script (`heartbeat.sh`) |
 | **To** | Local filesystem (primary): `/var/lib/tianer/heartbeat/<sniffer_name>.ts` and Database (secondary): `bluetooth.sniffer_heartbeat` table |
 | **Primary path** | Local file on V02. Contains a single Unix epoch timestamp (integer). Updated every 30 seconds. Read by gap detector (C06) via V02 `:ro` mount. |
-| **Secondary path** | PostgreSQL table `bluetooth.sniffer_heartbeat` (see C02 schema). Upsert on `sniffer_name` with `last_beat_ts`. Written best-effort; failures are logged but do not block the heartbeat loop. |
+| **Secondary path** | PostgreSQL table `bluetooth.sniffer_heartbeat` (see C02 §3.8 schema). Upsert on `sniffer_id` (PK per C02 schema). Heartbeat script first resolves `sniffer_name → sniffer_id` from the `sniffers` table at startup, then writes `(sniffer_id, ts, status)` with `status='running'` via `ON CONFLICT (sniffer_id)`. Written best-effort; failures are logged but do not block the heartbeat loop. |
 | **DB outage behaviour** | Primary local file continues updating. Secondary DB writes fail (logged at WARN). On DB recovery, gap detector (C06) backfills the DB heartbeat table from the local file timestamps. No false-positive gap alerts during DB outage (PF-3: redundant detection). |
 | **Interval** | 30 seconds (±2 seconds jitter from OS scheduling). |
 | **Staleness detection** | Gap detector (C06) reads the local heartbeat file. Alert when `(now - heartbeat_ts) > 60 seconds`. This allows one full missed update plus timing tolerance. |
@@ -984,7 +1077,7 @@ The following environment variables are set per sniffer instance in the Quadlet 
 | `BLESNIFF_SNIFFER_TYPE` | Yes | — | `ubertooth` or `nrf` |
 | `BLESNIFF_SNIFFER_DEVICE` | Yes | — | `/dev/tianer/<symlink>` |
 | `BLESNIFF_CHANNEL` / `BLESNIFF_CHANNELS` | No | `37` | Single channel (int) or comma-separated list (e.g., `37,38,39`) |
-| `BLESNIFF_DLT` | Yes (tshark container) | — | 251 (Ubertooth) or 195 (nRF) |
+| `BLESNIFF_DLT` | Yes (tshark container) | — | 256 (Ubertooth) or 272 (nRF) |
 | `BLESNIFF_PCAP_DIR` | No | `/var/lib/tianer/pcap` | Parent directory for PCAP files |
 | `BLESNIFF_FIFO_DIR` | No | `/var/run/tianer` | Parent directory for FIFOs |
 | `BLESNIFF_HEARTBEAT_INTERVAL` | No | `30` | Heartbeat interval in seconds |
@@ -1053,8 +1146,8 @@ All wrapper scripts are tested with bats-core (Bash Automated Testing System). T
 
 | Test | Hardware Required | Scope |
 |------|-------------------|-------|
-| `test_ubertooth_capture.sh` | Ubertooth One | Verify Ubertooth captures on channel 37; verify DLT 251 PCAP output; verify tshark field extraction |
-| `test_nrf_capture.sh` | nRF52840 Dongle | Verify nRF Sniffer captures; verify DLT 195 PCAP output; verify channel hopping; verify multi-channel output |
+| `test_ubertooth_capture.sh` | Ubertooth One | Verify Ubertooth captures on channel 37; verify DLT 256 PCAP output; verify tshark field extraction |
+| `test_nrf_capture.sh` | nRF52840 Dongle | Verify nRF Sniffer captures; verify DLT 272 PCAP output; verify channel hopping; verify multi-channel output |
 | `test_multi_sniffer.sh` | 2+ dongles | Verify two sniffers run concurrently without interference |
 | `test_usb_disconnect.sh` | Any dongle | Physically disconnect during capture; verify heartbeat stops; verify container restart on reconnect |
 
@@ -1065,7 +1158,7 @@ All wrapper scripts are tested with bats-core (Bash Automated Testing System). T
 | **PCAP data integrity** | PCAP packet count vs bytes written | Zero discrepancy (write-and-verify) |
 | **FIFO throughput** | Packets/sec through PCAP FIFO | ≥ 1000 pps sustained (typical BLE advertising rate) |
 | **Backpressure isolation** | PCAP packets written during 60s FIFO block | Zero loss (all packets in PCAP) |
-| **tshark normalisation** | Fields in ingest FIFO output | All 9 fields present; consistent order; DLT-independent |
+| **tshark normalisation** | Fields in ingest FIFO output | All 7 fields present (per CAPTURE-2); consistent order; DLT-independent |
 | **Heartbeat liveness** | Heartbeat file update interval | Every 30s ± 5s |
 | **DLT validation** | Mismatch detection | 100% of mismatches detected at startup |
 | **Startup time** | Sniffer ready → first packet to PCAP | ≤ 5 seconds from container start |
@@ -1122,6 +1215,7 @@ GroupAdd=keep-groups
 Exec=/usr/local/lib/tianer/wrap/sniffer-entrypoint.sh
 
 # Restart
+# Restart=, RestartSec=, StartLimitBurst= per systemd.service(5) [6].
 Restart=on-failure
 RestartSec=5
 StartLimitBurst=5
@@ -1146,7 +1240,7 @@ Image=localhost/tianer-tshark:latest
 EnvironmentFile=/etc/tianer/tianer.env
 EnvironmentFile=/etc/tianer/blesniff.env
 Environment=BLESNIFF_SNIFFER_NAME=%i
-# BLESNIFF_DLT set per-instance: 251 for ubertooth, 195 for nrf
+# BLESNIFF_DLT set per-instance: 256 for ubertooth, 272 for nrf
 
 Pod=tianer-capture.pod
 Network=none
@@ -1165,6 +1259,7 @@ GroupAdd=keep-groups
 
 Exec=/usr/local/lib/tianer/wrap/tshark-entrypoint.sh
 
+# Restart [6]
 Restart=on-failure
 RestartSec=5
 StartLimitBurst=5
@@ -1260,18 +1355,52 @@ No container image rebuild is required for configuration changes.
 
 ## References
 
-| Document | Reference |
-|----------|-----------|
-| component-breakdown.md §5.2 C03 | Component artifact requirements for C03 |
-| storage-strategy.md | Decoupled capture architecture, backpressure isolation, V02/V03/V08 |
-| c01-platform-infrastructure.md | USB udev symlinks, filesystem layout, tmpfiles, Quadlet prerequisites |
-| ADR-0001 D-05 | Channel strategy: configurable per sniffer, default ch37 |
-| ADR-0001 D-11 | Heartbeat: local file primary, DB secondary |
-| ADR-0001 D-12 | tshark: per-DLT parameterised configuration |
-| ADR-0001 D-03 | nRF USB PID: 1915:522A (sniffer) + 1915:520f (DFU) |
-| ADR-0001 Q4 | USB device symlink strategy: persistent `/dev/tianer/` names |
-| ADR-0001 Q6 | Single-dongle channel strategy: configurable per sniffer |
-| ADR-0001 Q7 | CRC-24 verification: deferred to C07 Deep Parser |
-| c04-pcap-rotation.md | Rotation coordination via SIGHUP (ROTATION-1) |
-| c05-ingest-bridge.md | Ingest FIFO reader, CAPTURE-2 contract consumer |
-| c02-database.md | `bluetooth.sniffer_heartbeat` table, DB schema |
+### External Sources
+
+[1] Bluetooth SIG. "Bluetooth Core Specification v5.4, Vol 6, Part A — Physical Layer." https://www.bluetooth.com/specifications/specs/core-specification-5-4/, 2023.
+  - §A.1: BLE advertising channel mapping — channel 37→2402 MHz, 38→2426 MHz, 39→2480 MHz.
+  - Vol 6, Part B, §2.3: Advertising channel PDU header format (PDU Type, TxAdd, RxAdd, ChSel bit fields).
+
+[2] The Tcpdump Group. "Link-Layer Header Types." https://www.tcpdump.org/linktypes.html, 2024.
+  - `LINKTYPE_BLUETOOTH_LE_LL_WITH_PHDR` (DLT 256): Bluetooth Low Energy link-layer packets with pseudo-header (Ubertooth One).
+  - `LINKTYPE_NORDIC_BLE` (DLT 272): Nordic Semiconductor nRF Sniffer for Bluetooth LE packets.
+
+[3] Wireshark Foundation. "tshark(1) — Dump and Analyze Network Traffic." https://www.wireshark.org/docs/man-pages/tshark.html, 2024.
+  - `-T fields`: Output only requested fields.
+  - `-e <field>`: Add a field to the list of fields to display.
+  - `-E separator=, quote=, occurrence=`: Control field printing format.
+  - `-l`: Flush output after each packet (line-buffered).
+
+[4] Nordic Semiconductor. "nRF Sniffer for Bluetooth LE — User Guide." https://docs.nordicsemi.com/bundle/ug_sniffer_ble/page/UG/sniffer_ble/intro.html, 2023.
+  - `nrfutil ble-sniffer`: Command-line tool for nRF52840 BLE packet capture.
+  - Channel hopping across BLE advertising channels 37, 38, 39.
+  - USB PID: 1915:522A (sniffer mode), 1915:520f (DFU/bootloader mode).
+
+[5] Great Scott Gadgets. "Ubertooth — Software, Firmware, and Hardware Designs." https://github.com/greatscottgadgets/ubertooth, 2020.
+  - `ubertooth-btle`: BLE advertising capture tool for Ubertooth One.
+  - Single-channel capture at a time (hardware limitation).
+  - Output in PCAP format with DLT 256.
+
+[6] Freedesktop.org. "systemd.service(5) — Service Unit Configuration." https://www.man7.org/linux/man-pages/man5/systemd.service.5.html, 2024.
+  - `Restart=`: Configures whether the service shall be restarted (no, on-success, on-failure, on-abnormal, on-watchdog, on-abort, always).
+  - `RestartSec=`: Time to sleep before restarting a service.
+  - `StartLimitBurst=`, `StartLimitIntervalSec=`: Unit start rate limiting.
+
+### Internal Project References
+
+The following project-internal documents provide further design context and decisions:
+
+- `component-breakdown.md` §5.2 C03 — Component artifact requirements for C03.
+- `storage-strategy.md` — Decoupled capture architecture, backpressure isolation, V02/V03/V08.
+- `c01-platform-infrastructure.md` — USB udev symlinks, filesystem layout, tmpfiles, Quadlet prerequisites.
+- `c02-database.md` — `bluetooth.sniffer_heartbeat` table, DB schema.
+- `c04-pcap-rotation.md` — Rotation coordination via SIGHUP (ROTATION-1).
+- `c05-ingest-bridge.md` — Ingest FIFO reader, CAPTURE-2 contract consumer.
+- `ADR-0001` — Archived design decisions:
+  - D-03: nRF USB PID: 1915:522A (sniffer) + 1915:520f (DFU).
+  - D-05: Channel strategy — configurable per sniffer, default ch37.
+  - D-11: Heartbeat — local file primary, DB secondary.
+  - D-12: tshark — per-DLT parameterised configuration.
+  - Q4: USB device symlink strategy — persistent `/dev/tianer/` names.
+  - Q6: Single-dongle channel strategy — configurable per sniffer.
+  - Q7: CRC-24 verification — deferred to C07 Deep Parser.

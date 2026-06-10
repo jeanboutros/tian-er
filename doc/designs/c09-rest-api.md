@@ -148,7 +148,7 @@ The API maintains **two separate asyncpg connection pools**, one per database ro
 
 | Pool | Role | Max Connections | Purpose |
 |------|------|----------------|---------|
-| `read_pool` | `tianer_ro` | 10 | All read-only endpoints: `/api/devices`, `/api/devices/{mac}`, `/api/devices/{mac}/timeline`, `/api/devices/{mac}/enrichment`, `/api/alerts/new-devices` |
+| `read_pool` | `tianer_ro` | 10 | All read-only endpoints: `/api/devices`, `/api/devices/{mac}`, `/api/devices/{mac}/timeline`, `/api/devices/{mac}/enrichment`, `/api/alerts/new-devices`, `/api/packets`, `/api/sniffers`, `/api/stats` |
 | `write_pool` | `tianer` | 5 | Write endpoints: continuous aggregate refresh, residency classification refresh. Also used by the SSE manager to poll for new devices. |
 
 The `tianer_writer` role is **never used by the API**. It is exclusive to:
@@ -371,6 +371,205 @@ class ErrorResponse(BaseModel):
     message: str = Field(..., description="Human-readable error description.")
     detail: Optional[str] = Field(None, description="Optional detailed information.")
 ```
+
+### 3.9 PacketItem
+
+Represents a single raw packet in the Packet Explorer view.
+
+```python
+class PacketItem(BaseModel):
+    """A single raw BLE packet from the capture pipeline.
+
+    Maps to bluetooth.raw_packets with decoded fields.
+    """
+    ts: datetime = Field(
+        ...,
+        description="Packet capture timestamp (ISO 8601).",
+    )
+    sniffer_id: int = Field(
+        ...,
+        ge=1,
+        le=4,
+        description="Sniffer that captured this packet.",
+    )
+    mac: str = Field(
+        ...,
+        description="Bluetooth device address encoded as hex colon-separated.",
+        pattern=r"^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$",
+    )
+    rssi: Optional[int] = Field(
+        None,
+        description="Received Signal Strength Indicator in dBm.",
+    )
+    pdu_type: str = Field(
+        ...,
+        description="BLE PDU type (e.g. 'ADV_IND', 'SCAN_RSP', 'ADV_NONCONN_IND').",
+    )
+    channel: int = Field(
+        ...,
+        ge=37,
+        le=39,
+        description="BLE advertising channel (37, 38, or 39).",
+    )
+    raw_data_hex: Optional[str] = Field(
+        None,
+        description="Hex-encoded raw PDU payload bytes.",
+    )
+```
+
+**DB mapping:** `ts` maps to the `ts` column in the `raw_packets` hypertable. `mac` is decoded from `BYTEA mac_address` using `encode(mac_address, 'hex')`. `pdu_type` is decoded from `SMALLINT pdu_type` per the BLE Core Specification PDU type encoding. There is no synthetic `id` column on `raw_packets` — packets are identified by the composite key `(sniffer_id, ts, mac_address, pdu_type)`.
+
+### 3.10 PacketListResponse
+
+```python
+class PacketListResponse(BaseModel):
+    """Paginated raw packet list response."""
+    packets: list[PacketItem] = Field(
+        default_factory=list,
+        description="List of packets for the current page.",
+    )
+    total: int = Field(
+        ...,
+        ge=0,
+        description="Total number of packets matching the query.",
+    )
+    limit: int = Field(
+        ...,
+        gt=0,
+        le=500,
+        description="Requested page size.",
+    )
+    offset: int = Field(
+        ...,
+        ge=0,
+        description="Requested page offset.",
+    )
+```
+
+### 3.11 SnifferStatus
+
+Represents a single sniffer's operational status for the SideStatusPanel.
+
+```python
+class SnifferStatus(BaseModel):
+    """Operational status of a single sniffer."""
+    sniffer_id: int = Field(
+        ...,
+        ge=1,
+        le=4,
+        description="Sniffer identifier.",
+    )
+    name: str = Field(
+        ...,
+        description="Human-readable sniffer name (e.g. 'ut1').",
+    )
+    type: str = Field(
+        ...,
+        description="Sniffer hardware type: 'ubertooth', 'nrf52840', or 'hci'.",
+    )
+    mode: str = Field(
+        ...,
+        description="Current operating mode (e.g. 'btle').",
+    )
+    channel: int = Field(
+        ...,
+        ge=37,
+        le=39,
+        description="Currently tuned BLE advertising channel.",
+    )
+    enabled: bool = Field(
+        ...,
+        description="Whether this sniffer is enabled in the pipeline configuration.",
+    )
+    last_heartbeat: Optional[datetime] = Field(
+        None,
+        description="Timestamp of the most recent heartbeat from this sniffer (ISO 8601).",
+    )
+    status: Literal["running", "stopped", "error", "unknown"] = Field(
+        ...,
+        description="Current operational status. 'running': heartbeat within 60s. 'stopped': enabled but no recent heartbeat. 'error': sniffer process exited abnormally. 'unknown': sniffer has not reported status.",
+    )
+```
+
+**DB mapping:** Queries the `bluetooth.sniffers` table joined with `bluetooth.sniffer_heartbeat` for the most recent heartbeat timestamp. `status` is derived: `running` when `enabled = TRUE` AND `last_heartbeat` is within 60 seconds; `stopped` when `enabled = TRUE` but heartbeat is stale; `error` when the process is not running; `unknown` when no heartbeat has ever been recorded.
+
+### 3.12 SnifferListResponse
+
+```python
+class SnifferListResponse(BaseModel):
+    """Sniffer status list response for the SideStatusPanel."""
+    sniffers: list[SnifferStatus] = Field(
+        default_factory=list,
+        description="List of all configured sniffers with their current status.",
+    )
+```
+
+### 3.13 DashboardStats
+
+Aggregate overview statistics for the Dashboard StatCards.
+
+```python
+class DashboardStats(BaseModel):
+    """Aggregate dashboard overview statistics.
+
+    All counts are computed from live database queries. This model
+    combines data from multiple tables (device_summary, raw_packets,
+    sniffers, ingest_gaps, and system metrics) into a single response.
+    """
+    total_devices: int = Field(
+        ...,
+        ge=0,
+        description="Total distinct devices ever observed.",
+    )
+    active_devices_1h: int = Field(
+        ...,
+        ge=0,
+        description="Devices with last_seen within the past hour.",
+    )
+    new_devices_24h: int = Field(
+        ...,
+        ge=0,
+        description="Devices with first_seen within the past 24 hours.",
+    )
+    packets_today: int = Field(
+        ...,
+        ge=0,
+        description="Total packets captured since midnight UTC.",
+    )
+    packet_rate_current: int = Field(
+        ...,
+        ge=0,
+        description="Estimated current packet rate (packets per second, averaged over last 60 seconds).",
+    )
+    sniffers_online: int = Field(
+        ...,
+        ge=0,
+        description="Number of sniffers with a heartbeat within the last 60 seconds.",
+    )
+    sniffers_total: int = Field(
+        ...,
+        ge=0,
+        description="Total number of configured sniffers.",
+    )
+    gaps_open: int = Field(
+        ...,
+        ge=0,
+        description="Number of currently open ingest gaps.",
+    )
+    disk_usage_pct: float = Field(
+        ...,
+        ge=0,
+        le=100,
+        description="PCAP storage disk usage percentage.",
+    )
+    uptime_seconds: int = Field(
+        ...,
+        ge=0,
+        description="System uptime in seconds (from /proc/uptime on the host or container start time).",
+    )
+```
+
+**Caching:** This endpoint response is cached for 30 seconds. Stats do not require per-request freshness — the DashboardView polls at 60-second intervals, so a 30-second cache TTL prevents redundant database queries during rapid page loads or SSE-triggered re-fetches without meaningfully delaying data freshness.
 
 ---
 
@@ -738,14 +937,10 @@ class SSEManager:
                             last_seen_max,
                         )
                         for row in rows:
-                            await self.broadcast("new_device", {
+                            await self.broadcast("device:new", {
                                 "mac": row["mac"],
                                 "first_seen": row["first_seen"].isoformat(),
-                                "address_type": (
-                                    "public" if row["address_type"] == 0
-                                    else "random" if row["address_type"] == 1
-                                    else "unknown"
-                                ),
+                                "rssi": row.get("rssi", -100),
                             })
                         if rows:
                             last_seen_max = rows[0]["first_seen"]
@@ -770,11 +965,13 @@ router = APIRouter()
 async def event_stream(request: Request, _=Depends(auth)):
     """Stream live events via Server-Sent Events.
 
-    Requires X-API-Key header. Returns text/event-stream.
+    Requires authentication (cookie-based for browser EventSource, or
+    X-API-Key header for programmatic clients). Returns text/event-stream.
     Events:
-        - new_device: A device was seen for the first time.
-        - gap_detected: An ingest gap was detected.
-        - heartbeat: Every 30s, includes current server timestamp.
+        - device:new: A device was seen for the first time in the current session.
+        - packet:batch: Batched packet count per sniffer, emitted every ~2 seconds.
+        - health:change: A sniffer's status changed (online/offline).
+        - gap:detected: The gap detector found a missing time window.
     """
     return StreamingResponse(
         sse_manager.subscribe(),
@@ -787,17 +984,23 @@ async def event_stream(request: Request, _=Depends(auth)):
     )
 ```
 
-**Event types:**
+**Event types (aligned with C10 §3.3):**
 
 | Event Type | Trigger | Data Fields |
 |------------|---------|-------------|
-| `new_device` | A device with `first_seen` newer than the last poll | `mac`, `first_seen`, `address_type` |
-| `gap_detected` | A new row appears in `ingest_gaps` with status `open` | `sniffer_id`, `bucket_start`, `bucket_end` |
-| `heartbeat` | Every 30 seconds regardless of data | `ts` (server timestamp), `clients` (connected count) |
+| `device:new` | A device with `first_seen` newer than the last poll | `mac` (hex colon-separated string), `first_seen` (ISO 8601), `rssi` (int, dBm) |
+| `packet:batch` | Every ~2 seconds for each active sniffer | `sniffer_id` (int), `count` (int, packets in this window), `window_start` (ISO 8601), `window_end` (ISO 8601) |
+| `health:change` | Sniffer heartbeat transitions between online/offline state | `component` (string, always `"sniffer"`), `sniffer_id` (int), `status` (`"online"` or `"offline"`), `ts` (ISO 8601) |
+| `gap:detected` | A new row appears in `ingest_gaps` with status `open` | `sniffer_id` (int), `gap_start` (ISO 8601), `gap_end` (ISO 8601), `bucket_count` (int) |
 
 **Design notes:**
 - SSE is unidirectional (server → client). The browser can close the connection and the server detects it via `CancelledError`.
 - Each client has its own `asyncio.Queue` with a max size of 100. Slow clients that don't read events fast enough are silently disconnected.
+- **Event source expansion (post-MVP):** The MVP SSE polling task only broadcasts `device:new` events. The `packet:batch`, `health:change`, and `gap:detected` event types are defined in the inter-component contract (§5.1 API-1.7) so C10 can implement the receiving side. These are broadcast by separate polling tasks or trigger-based listeners:
+  - `packet:batch` — polled from `raw_packets` per-sniffer every 2 seconds (`COUNT(*)` grouped by sniffer, windowed).
+  - `health:change` — polled from `sniffer_heartbeat`, broadcast on status transition (online→offline or offline→online).
+  - `gap:detected` — polled from `ingest_gaps` with `status = 'open'`.
+- **Cookie-based auth for browser SSE:** The native `EventSource` API cannot send custom HTTP headers. The SSE endpoint supports cookie-based authentication: on first valid API key validation, C09 sets a `tianer_auth` cookie (Secure, SameSite=Strict, HttpOnly). The SSE endpoint accepts either the `X-API-Key` header OR the `tianer_auth` cookie for authentication. The browser's `EventSource` connects with `withCredentials: true` to send the cookie automatically.
 - The polling interval is 2 seconds. This trades freshness for simplicity. A post-MVP improvement could use PostgreSQL `LISTEN/NOTIFY` to eliminate polling.
 - The SSE manager is a module-level singleton. In a multi-worker deployment (multiple uvicorn workers), each worker would have its own SSE manager — acceptable for a single-user LAN deployment. Post-MVP could use Redis pub/sub for cross-worker broadcast.
 
@@ -1018,11 +1221,11 @@ LIMIT $2 OFFSET $3;
 |----------|-------|
 | **Method** | GET |
 | **Path** | `/api/events` |
-| **Auth** | `X-API-Key` header required |
+| **Auth** | Cookie-based (`tianer_auth`) OR `X-API-Key` header. Browser clients use `EventSource` with `withCredentials: true`; the cookie is set by C09 on first API key validation via `POST /api/auth/login` or on first valid `X-API-Key` request. |
 | **Query Params** | None |
 | **Response Content-Type** | `text/event-stream` |
 | **Connection** | Long-lived (keep-alive). Server sends events as they occur. |
-| **Event Types** | `new_device`, `gap_detected`, `heartbeat` (§4.5) |
+| **Event Types** | `device:new`, `packet:batch`, `health:change`, `gap:detected` (§4.5) |
 | **Error Responses** | `401 Unauthorized`. `429 Too Many Requests`. Connection dropped → client should reconnect after 5 seconds with exponential backoff. |
 | **Rate Limited** | Yes (counts as 1 token when connection established; SSE data frames do not consume tokens) |
 
@@ -1051,7 +1254,147 @@ This endpoint exposes the Prometheus metrics registry in OpenMetrics text format
 - `tianer_api_sse_clients` — gauge (number of connected SSE clients)
 - `tianer_api_rate_limit_hits_total` — counter
 
-#### API-1.9: Standard Error Responses
+#### API-1.9: GET /api/packets
+
+| Property | Value |
+|----------|-------|
+| **Method** | GET |
+| **Path** | `/api/packets` |
+| **Auth** | `X-API-Key` header required |
+| **Query Params** | `sniffer_id` (int, optional, 1–4) — filter by sniffer. `mac` (string, optional) — hex colon-separated MAC address filter (exact match on `encode(mac_address, 'hex')`). `pdu_type` (string, optional) — filter by PDU type (e.g. `ADV_IND`, `SCAN_RSP`, `ADV_NONCONN_IND`). `channel` (int, optional, 37–39) — filter by BLE advertising channel. `since` (ISO 8601, optional, default: 24 hours ago) — only packets after this timestamp. `limit` (int, optional, default 50, max 500). `offset` (int, optional, default 0). |
+| **Sort** | `-ts` (default, newest first). No alternate sort options in v1 — packet lists are always reverse-chronological. |
+| **Success Response** | `200 OK`, `Content-Type: application/json` |
+| **Response Model** | `PacketListResponse` (§3.10) |
+| **Error Responses** | `400 Bad Request` — invalid query parameter. `401 Unauthorized` — missing/invalid API key. `429 Too Many Requests`. `503 Service Unavailable` — database down. |
+| **Rate Limited** | Yes (100 req/s) |
+| **DB Role** | `tianer_ro` |
+
+**Example request:**
+```
+GET /api/packets?sniffer_id=1&pdu_type=ADV_IND&channel=37&limit=50&offset=0
+X-API-Key: dGhpc2lzYXRlc3RrZXk=
+```
+
+**Example response:**
+```json
+{
+    "packets": [
+        {
+            "ts": "2026-06-09T14:30:05Z",
+            "sniffer_id": 1,
+            "mac": "aa:bb:cc:dd:ee:ff",
+            "rssi": -62,
+            "pdu_type": "ADV_IND",
+            "channel": 37,
+            "raw_data_hex": "0201060303e0ff0c094d79446576696365"
+        }
+    ],
+    "total": 15234,
+    "limit": 50,
+    "offset": 0
+}
+```
+
+**Implementation notes:**
+- The query targets `bluetooth.raw_packets` hypertable. Since this is a time-series table, the `since` parameter is used for partition pruning.
+- `mac` filtering uses exact match: `WHERE encode(mac_address, 'hex') = $N` (lowercased).
+- `pdu_type` filtering maps the string to the `SMALLINT` encoding from the deep parser (C07). The query builder maintains a `PDU_TYPE_MAP` dictionary for this conversion.
+- If `sniffer_id`, `mac`, `pdu_type`, and `channel` are all omitted, returns all packets in the time window — this can be a heavy query. The frontend should always provide at least one filter or a narrow `since` window.
+
+#### API-1.10: GET /api/sniffers
+
+| Property | Value |
+|----------|-------|
+| **Method** | GET |
+| **Path** | `/api/sniffers` |
+| **Auth** | `X-API-Key` header required |
+| **Query Params** | None |
+| **Success Response** | `200 OK`, `Content-Type: application/json` |
+| **Response Model** | `SnifferListResponse` (§3.12) |
+| **Error Responses** | `401 Unauthorized` — missing/invalid API key. `429 Too Many Requests`. `503 Service Unavailable` — database down. |
+| **Rate Limited** | Yes (100 req/s) |
+| **DB Role** | `tianer_ro` |
+
+**Example response:**
+```json
+{
+    "sniffers": [
+        {
+            "sniffer_id": 1,
+            "name": "ut1",
+            "type": "ubertooth",
+            "mode": "btle",
+            "channel": 37,
+            "enabled": true,
+            "last_heartbeat": "2026-06-09T14:30:05Z",
+            "status": "running"
+        },
+        {
+            "sniffer_id": 2,
+            "name": "nrf1",
+            "type": "nrf52840",
+            "mode": "btle",
+            "channel": 38,
+            "enabled": true,
+            "last_heartbeat": "2026-06-09T14:29:55Z",
+            "status": "running"
+        }
+    ]
+}
+```
+
+**Implementation notes:**
+- The query joins `bluetooth.sniffers` with the most recent row from `bluetooth.sniffer_heartbeat` per sniffer.
+- `status` is derived at the API layer: `running` if heartbeat is within 60 seconds and `enabled = TRUE`; `stopped` if `enabled = TRUE` but heartbeat is stale; `error` if the sniffer process is not running; `unknown` if no heartbeat has ever been recorded.
+- This endpoint is consumed primarily by the `SideStatusPanel` component. It is also polled by the SSE polling task to detect sniffer state transitions.
+- No pagination — the number of sniffers is small (≤ 4 in the MVP architecture, max 8 with future expansion).
+
+#### API-1.11: GET /api/stats
+
+| Property | Value |
+|----------|-------|
+| **Method** | GET |
+| **Path** | `/api/stats` |
+| **Auth** | `X-API-Key` header required |
+| **Query Params** | None |
+| **Success Response** | `200 OK`, `Content-Type: application/json` |
+| **Response Model** | `DashboardStats` (§3.13) |
+| **Error Responses** | `401 Unauthorized` — missing/invalid API key. `429 Too Many Requests`. `503 Service Unavailable` — database down. |
+| **Rate Limited** | Yes (100 req/s) |
+| **DB Role** | `tianer_ro` |
+| **Caching** | `Cache-Control: public, max-age=30`. Stats do not require per-request freshness — the DashboardView polls at 60-second intervals. A 30-second cache TTL prevents redundant database queries during rapid page loads while keeping data adequately fresh. |
+
+**Example response:**
+```json
+{
+    "total_devices": 42,
+    "active_devices_1h": 15,
+    "new_devices_24h": 3,
+    "packets_today": 125000,
+    "packet_rate_current": 127,
+    "sniffers_online": 2,
+    "sniffers_total": 4,
+    "gaps_open": 0,
+    "disk_usage_pct": 62.0,
+    "uptime_seconds": 302400
+}
+```
+
+**Implementation notes:**
+- `total_devices`: `SELECT COUNT(*) FROM bluetooth.device_summary`
+- `active_devices_1h`: `SELECT COUNT(*) FROM bluetooth.device_summary WHERE last_seen > NOW() - INTERVAL '1 hour'`
+- `new_devices_24h`: `SELECT COUNT(*) FROM bluetooth.device_summary WHERE first_seen > NOW() - INTERVAL '24 hours'`
+- `packets_today`: Queries the `raw_packets` hypertable with `WHERE ts >= CURRENT_DATE`. TimescaleDB chunk exclusion optimises this query.
+- `packet_rate_current`: `SELECT COUNT(*) FROM bluetooth.raw_packets WHERE ts > NOW() - INTERVAL '60 seconds'`, divided by 60. If zero packets in the window, returns 0.
+- `sniffers_online`: derived from the same logic as `SnifferStatus.status = 'running'`.
+- `sniffers_total`: `SELECT COUNT(*) FROM bluetooth.sniffers`.
+- `gaps_open`: `SELECT COUNT(*) FROM bluetooth.ingest_gaps WHERE status = 'open'`.
+- `disk_usage_pct`: Queried from the host filesystem (PCAP directory usage) or from a pre-computed metric. In the MVP, this is read from the `bluetooth.system_metrics` table populated by C13 Observability. Falls back to `-1` if the metric is unavailable.
+- `uptime_seconds`: Read from `/proc/uptime` on the host. In the container environment, this requires a bind-mount of `/proc/uptime` (read-only). Falls back to 0 if the file is unavailable.
+
+**Query optimisation:** All sub-queries run in parallel using `asyncio.gather()` to minimise total response latency. The endpoint is cached for 30 seconds to avoid redundant computation.
+
+#### API-1.12: Standard Error Responses
 
 All endpoints return these standardized error bodies:
 
@@ -1500,7 +1843,7 @@ settings = Settings()
 
 ### 10.1 Unit Tests (pytest + httpx)
 
-All tests use **pytest 8.0+** with **pytest-asyncio 0.23+** and **httpx** for async HTTP client testing. Tests run against a real PostgreSQL test database (not mocks).
+All tests use **pytest 8.0+** [7] with **pytest-asyncio 0.23+** and **httpx** [8] for async HTTP client testing. Tests run against a real PostgreSQL test database (not mocks).
 
 | Test File | What It Tests | Key Assertions |
 |-----------|---------------|----------------|
@@ -1511,7 +1854,7 @@ All tests use **pytest 8.0+** with **pytest-asyncio 0.23+** and **httpx** for as
 | `test_auth.py` | API key authentication | Missing header → 401. Invalid key → 401. Valid key → 200. Health endpoint accessible without key. Metrics endpoint accessible without key (but loopback only). |
 | `test_rate_limit.py` | Rate limiting middleware | Requests within limit → 200. Requests exceeding limit → 429 with `Retry-After` header. Rate resets after wait period. Health/metrics endpoints not rate-limited. |
 | `test_validation.py` | Input validation | Invalid MAC format → 400. Negative limit → 400. Limit > 500 → clamped to 500. Invalid sort field → 400. Invalid bucket → 400. Missing required params → 422. |
-| `test_sse.py` | SSE streaming endpoint | Connection returns `text/event-stream`. Heartbeat events arrive within 5 seconds. `new_device` event fires when test inserts device. Client disconnect is clean. |  |
+| `test_sse.py` | SSE streaming endpoint | Connection returns `text/event-stream`. Keep-alive comments arrive within 16 seconds. `device:new` event fires when test inserts device. Client disconnect is clean. Cookie auth works with `withCredentials`. |  |
 | `test_metrics.py` | `/api/metrics` endpoint | Returns `text/plain`. Contains expected metric names. Non-loopback request → 403. |
 
 ### 10.2 Integration Tests
@@ -1536,7 +1879,7 @@ All tests use **pytest 8.0+** with **pytest-asyncio 0.23+** and **httpx** for as
 
 ### 10.4 Test Database Setup
 
-Tests use a **dedicated test database** `tianer_test` created via `pytest fixtures`:
+Tests use a **dedicated test database** `tianer_test` created via `pytest fixtures` [7] with asyncpg [9]:
 
 ```python
 # conftest.py
@@ -1763,6 +2106,11 @@ Before considering C09 deployed, verify:
 | `HealthStatus` | `/api/health` | `sniffers`, `sniffer_heartbeat`, `ingest_gaps`, `_migrations` |
 | `SnifferHealth` | (part of `HealthStatus`) | `sniffers`, `sniffer_heartbeat` |
 | `AlertInfo` | (SSE event) | `device_summary`, `ingest_gaps` |
+| `PacketItem` | `/api/packets` | `raw_packets` |
+| `PacketListResponse` | `/api/packets` | `raw_packets` |
+| `SnifferStatus` | `/api/sniffers` | `sniffers`, `sniffer_heartbeat` |
+| `SnifferListResponse` | `/api/sniffers` | `sniffers`, `sniffer_heartbeat` |
+| `DashboardStats` | `/api/stats` | `device_summary`, `raw_packets`, `sniffers`, `sniffer_heartbeat`, `ingest_gaps`, `system_metrics` |
 | `PaginatedResponse` | (wraps list endpoints) | — |
 | `TimelineResponse` | (wraps timeline) | — |
 | `ErrorResponse` | (all error responses) | — |
@@ -1777,6 +2125,9 @@ Before considering C09 deployed, verify:
 | GET | `/api/devices/{mac}/timeline` | Yes | Yes | `tianer_ro` | Device timeline aggregates |
 | GET | `/api/devices/{mac}/enrichment` | Yes | Yes | `tianer_ro` | Device enrichment records |
 | GET | `/api/alerts/new-devices` | Yes | Yes | `tianer_ro` | Recently first-seen devices |
+| GET | `/api/packets` | Yes | Yes | `tianer_ro` | Paginated raw packet list |
+| GET | `/api/sniffers` | Yes | Yes | `tianer_ro` | Sniffer status list |
+| GET | `/api/stats` | Yes | Yes | `tianer_ro` | Aggregate dashboard stats |
 | GET | `/api/events` | Yes | Yes (connect) | `tianer_ro` | SSE live event stream |
 | GET | `/api/metrics` | No | No | N/A (in-memory) | Prometheus metrics |
 | GET | `/*` (frontend) | No | No | N/A | SPA static files |
@@ -1805,7 +2156,13 @@ Before considering C09 deployed, verify:
 
 [6] Encode. "Uvicorn — Settings." https://www.uvicorn.org/settings/, 2024. Deployment documentation covering `--workers`, `--proxy-headers`, `--ssl-keyfile`, `--ssl-certfile`.
 
-[7] Python Software Foundation. "asyncio — Queues." https://docs.python.org/3/library/asyncio-queue.html, Python 3.14 Documentation. `asyncio.Queue` class used for SSE event distribution.
+[7] pytest. "pytest: helps you write better programs." https://docs.pytest.org/en/stable/, v8.0+. — Documents pytest testing framework: test discovery, fixture system (`@pytest.fixture` with session scope for test database setup), `pytest-asyncio` plugin for async test support, and `conftest.py` shared fixtures (§10.1, §10.4).
+
+[8] httpx. "httpx — A next-generation HTTP client for Python." https://www.python-httpx.org/ — Documents httpx async HTTP client: `httpx.AsyncClient` with `ASGITransport` for in-process ASGI testing, cookie and header management, and timeout configuration — used for all API endpoint tests (§10.1, §10.2).
+
+[9] MagicStack. "asyncpg — A fast PostgreSQL Database Client Library for Python/asyncio." https://github.com/MagicStack/asyncpg — Documents asyncpg's async connection API: `asyncpg.connect()`, connection pool (`asyncpg.create_pool()`), and parameterized query execution — used by C09 for database connections in test fixtures (§10.4) and production connection pools (§4.2).
+
+[10] Python Software Foundation. "asyncio — Queues." https://docs.python.org/3/library/asyncio-queue.html, Python 3.14 Documentation. `asyncio.Queue` class used for SSE event distribution.
 
 ---
 

@@ -20,7 +20,7 @@ The Tian'er frontend is a dark-themed Single-Page Application (SPA) that serves 
 - Expandable side status panel (sniffer health, green/grey indicators)
 - Client-side device table with sorting and filtering (<200 devices)
 - Time-series charts via ECharts 5 with dark theme
-- Anonymous Grafana iframe embedding (2 dashboards)
+- Anonymous Grafana iframe embedding (1 dashboard: pipeline-health)
 - SSE-based live data updates from C09 REST API
 - WCAG 2.2 AA-lite compliance (keyboard nav, ARIA landmarks, focus management, contrast ≥4.5:1)
 - TypeScript strict mode + OpenAPI-generated API types
@@ -76,7 +76,7 @@ Browser
   │                      │
   │                      ├─► ECharts 5 (time-series charts)
   │                      ├─► TanStack Table v8 (device table)
-  │                      └─► Grafana iframe (anonymous, 2 dashboards)
+  │                      └─► Grafana iframe (anonymous, 1 dashboard: pipeline-health)
   │
   └─► Error Boundary (global error handler)
 ```
@@ -182,7 +182,7 @@ The frontend does not own a persistent data model — all data is transient, fet
 ┌─────────────────────┐     ┌──────────────────────────┐
 │    SnifferHealth    │     │        DeviceSummary       │
 ├─────────────────────┤     ├──────────────────────────┤
-│ sniffer_id: string  │     │ device_address: string    │
+│ sniffer_id: number  │     │ device_address: string    │
 │ name: string        │     │ address_type: enum        │
 │ type: enum          │     │ last_seen: Date           │
 │ status: enum        │     │ observation_count: number │
@@ -193,22 +193,28 @@ The frontend does not own a persistent data model — all data is transient, fet
 └─────────────────────┘     └──────────────────────────┘
 
 ┌──────────────────────────┐   ┌──────────────────────────┐
-│       RawPacket           │   │      TimeRangeState       │
+│       RawPacket           │   │      DashboardStats       │
 ├──────────────────────────┤   ├──────────────────────────┤
-│ packet_id: number        │   │ start: Date               │
-│ sniffer_id: string       │   │ end: Date                 │
-│ ts: Date                 │   │ preset: enum              │
-│ device_address: string   │   │ (1h, 6h, 24h, 7d, custom)│
-│ rssi: number             │   └──────────────────────────┘
-│ pdu_type: enum           │
-│ channel: number          │   ┌──────────────────────────┐
-│ raw_data_hex: string?    │   │      UISettingsState       │
-└──────────────────────────┘   ├──────────────────────────┤
-                               │ theme: "dark" (fixed)     │
-                               │ sidebarCollapsed: boolean │
-                               │ grafanaBaseUrl: string    │
-                               │ timeRange: TimeRangeState │
-                               │ refreshInterval: number   │
+│ sniffer_id: number       │   │ total_devices: number     │
+│ ts: Date                 │   │ active_devices_1h: number │
+│ device_address: string   │   │ new_devices_24h: number   │
+│ rssi: number             │   │ packets_today: number     │
+│ pdu_type: enum           │   │ packet_rate_current: num  │
+│ channel: number          │   │ sniffers_online: number   │
+│ raw_data_hex: string?    │   │ sniffers_total: number    │
+└──────────────────────────┘   │ gaps_open: number         │
+                               │ disk_usage_pct: number    │
+                               │ uptime_seconds: number    │
+                               └──────────────────────────┘
+
+┌──────────────────────────┐   ┌──────────────────────────┐
+│      TimeRangeState       │   │      UISettingsState       │
+├──────────────────────────┤   ├──────────────────────────┤
+│ start: Date               │   │ theme: "dark" (fixed)     │
+│ end: Date                 │   │ sidebarCollapsed: boolean │
+│ preset: enum              │   │ grafanaBaseUrl: string    │
+│ (1h, 6h, 24h, 7d, custom)│   │ timeRange: TimeRangeState │
+└──────────────────────────┘   │ refreshInterval: number   │
                                └──────────────────────────┘
 ```
 
@@ -217,11 +223,19 @@ The frontend does not own a persistent data model — all data is transient, fet
 All data stores follow the 4-state model:
 
 ```
-FETCH ──► loading ──► empty ──► normal
-  │           │          │
-  └── error ──┘          │
-                         ▼
-                REFRESH (SSE update)
+FETCH ──► loading ──► normal       (happy path: data returned)
+  │           │
+  │           ├──► empty            (no data returned)
+  │           │      │
+  │           │      └──► normal    (SSE delivers first data)
+  │           │
+  │           ├──► error            (fetch fails)
+  │           │      │
+  │           │      └──► loading   (retry)
+  │           │
+  │           └──► normal ──► error (polling/refresh failure)
+  │
+  └── error ──► loading             (retry from error state)
 ```
 
 | State | Trigger | UI Rendering |
@@ -233,14 +247,16 @@ FETCH ──► loading ──► empty ──► normal
 
 ### 3.3 SSE Event Types
 
-The frontend subscribes to C09 SSE endpoint `/api/events` [UXE-03]. Event types:
+The frontend subscribes to C09 SSE endpoint `/api/events` [UXE-03]. Event types (aligned with C09 §4.5 / API-1.7):
 
 | Event | Payload | Updates Store |
 |-------|---------|---------------|
-| `sniffer:heartbeat` | `{sniffer_id, ts, packets_total, status}` | `health.ts` |
-| `sniffer:status_change` | `{sniffer_id, old_status, new_status}` | `health.ts` |
-| `packet:batch` | `{packets: RawPacket[], count: number}` | `packets.ts`, `devices.ts` (increments counters) |
-| `device:new` | `{device_address, first_seen}` | `devices.ts` |
+| `device:new` | `{"mac":"aa:bb:cc:dd:ee:ff","first_seen":"ISO8601","rssi":-52}` | `devicesStore.addNewDevice(data)` |
+| `packet:batch` | `{"sniffer_id":1,"count":127,"window_start":"ISO8601","window_end":"ISO8601"}` | `packetsStore.addBatch(data)`, `devicesStore.incrementCounters(data)` |
+| `health:change` | `{"component":"sniffer","sniffer_id":1,"status":"online"\|"offline","ts":"ISO8601"}` | `healthStore.updateComponentStatus(data)` |
+| `gap:detected` | `{"sniffer_id":1,"gap_start":"ISO8601","gap_end":"ISO8601","bucket_count":3}` | `healthStore.addGap(data)` |
+
+**Event naming convention:** Events use the `domain:action` pattern (colon-separated). This is consistent with the W3C SSE recommendation [12] for namespacing events without conflict. The C09 API defines and emits these events; the C10 frontend consumes them. The SSE connection also receives periodic keep-alive comments (`: keepalive\n\n`) from C09 to prevent proxy timeout.
 
 ---
 
@@ -271,6 +287,57 @@ The root layout is a CSS Grid shell:
 ```
 
 **Grid template:** `grid-cols-[auto_1fr]` with a CSS transition on the sidebar column. NavBar is `position: sticky; top: 0; z-index: 50`. SideStatusPanel is `position: sticky; top: 3.5rem; height: calc(100vh - 3.5rem); overflow-y: auto`.
+
+**Accessibility — skip-navigation link:**
+
+AppLayout must include a skip-navigation link as the first focusable element, visible on keyboard focus:
+
+```html
+<a href="#main-content" class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[100] focus:px-4 focus:py-2 focus:bg-bg-card focus:text-accent focus:rounded focus:ring-2 focus:ring-accent">
+  Skip to main content
+</a>
+```
+
+The `<router-view>` wrapper must carry `id="main-content"`:
+
+```html
+<main id="main-content">
+  <router-view />
+</main>
+```
+
+**Accessibility — ARIA live regions for SSE-driven updates:**
+
+SSE events drive dynamic content updates throughout the app. Screen reader users must be informed of these changes without disruption. The following ARIA live regions are required:
+
+| Region | Attribute | Location | Purpose |
+|--------|-----------|----------|---------|
+| General announcements | `aria-live="polite"` | AppLayout (invisible container adjacent to `<router-view>`) | Announces new devices detected, significant packet count milestones, gap detection alerts |
+| Sniffer status badges | `role="status"` | SideStatusPanel badge elements | Announces sniffer online/offline transitions as they occur via `health:change` SSE events |
+| StatCard values | `aria-atomic="true"` | DashboardView StatCard components | Screen readers re-read the entire StatCard (label + value) when values change, ensuring value-only updates are not missed |
+
+The general announcement region uses `aria-live="polite"` so announcements queue behind current screen reader speech. An invisible `<div>` with `aria-live="polite"` is maintained by the `useSSE` composable, which pushes human-readable messages (e.g., "New device detected: AA:BB:CC:DD:EE:FF") as `textContent` updates. The composable deduplicates rapid-fire updates by batching announcements within a 500ms debounce window.
+
+**Accessibility — route-change focus management:** After route navigation completes, keyboard focus must be programmatically moved to the `<h1>` heading of the new view. This ensures screen reader and keyboard users are not stranded at the navigation element after a route change (WCAG 2.2 SC 2.4.3 Focus Order [2]). Implementation uses Vue Router's `afterEach` guard:
+
+```typescript
+// src/router/index.ts
+router.afterEach(() => {
+  // Focus the page heading after route transition completes
+  // nextTick ensures the new view has rendered
+  import('vue').then(({ nextTick }) => {
+    nextTick(() => {
+      document.getElementById('page-heading')?.focus();
+    });
+  });
+});
+```
+
+Each view's `<h1>` must carry `id="page-heading"` and `tabindex="-1"` (to allow programmatic focus without adding it to the natural tab order). Example from `PageHeader.vue`:
+
+```html
+<h1 id="page-heading" tabindex="-1">{{ title }}</h1>
+```
 
 #### 4.1.2 Router Configuration
 
@@ -333,27 +400,91 @@ export const useDevicesStore = defineStore('devices', () => {
 // src/composables/useSSE.ts
 import { ref, onMounted, onUnmounted } from 'vue';
 
-export function useSSE(url: string) {
+/** Exponential backoff reconnect configuration. */
+const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 16000, 30000]; // ms
+const STALE_THRESHOLD_MS = 60_000; // 60s without events = stale
+
+export interface SSEHandlers {
+  onDeviceNew?: (data: { mac: string; first_seen: string; rssi: number }) => void;
+  onPacketBatch?: (data: { sniffer_id: number; count: number; window_start: string; window_end: string }) => void;
+  onHealthChange?: (data: { component: string; sniffer_id: number; status: 'online' | 'offline'; ts: string }) => void;
+  onGapDetected?: (data: { sniffer_id: number; gap_start: string; gap_end: string; bucket_count: number }) => void;
+}
+
+export function useSSE(url: string, handlers: SSEHandlers) {
   const connected = ref(false);
-  const lastEventId = ref<string | null>(null);
+  const stale = ref(false);
+  const lastEventAt = ref<Date | null>(null);
   let eventSource: EventSource | null = null;
+  let reconnectAttempt = 0;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let staleTimer: ReturnType<typeof setInterval> | null = null;
 
   function connect() {
-    eventSource = new EventSource(url);
-    eventSource.onopen = () => { connected.value = true; };
-    eventSource.onerror = () => { connected.value = false; /* exponential backoff reconnect */ };
-    return eventSource;
+    // Use withCredentials: true so the browser sends the tianer_auth cookie
+    // set by C09 on first valid API key validation.
+    eventSource = new EventSource(url, { withCredentials: true });
+
+    eventSource.onopen = () => {
+      connected.value = true;
+      stale.value = false;
+      reconnectAttempt = 0;
+    };
+
+    eventSource.addEventListener('device:new', (e: MessageEvent) => {
+      lastEventAt.value = new Date();
+      handlers.onDeviceNew?.(JSON.parse(e.data));
+    });
+
+    eventSource.addEventListener('packet:batch', (e: MessageEvent) => {
+      lastEventAt.value = new Date();
+      handlers.onPacketBatch?.(JSON.parse(e.data));
+    });
+
+    eventSource.addEventListener('health:change', (e: MessageEvent) => {
+      lastEventAt.value = new Date();
+      handlers.onHealthChange?.(JSON.parse(e.data));
+    });
+
+    eventSource.addEventListener('gap:detected', (e: MessageEvent) => {
+      lastEventAt.value = new Date();
+      handlers.onGapDetected?.(JSON.parse(e.data));
+    });
+
+    eventSource.onerror = () => {
+      connected.value = false;
+      eventSource?.close();
+      scheduleReconnect();
+    };
+
+    // Stale detection: if no events for >60s, mark as stale
+    staleTimer = setInterval(() => {
+      if (lastEventAt.value && (Date.now() - lastEventAt.value.getTime() > STALE_THRESHOLD_MS)) {
+        stale.value = true;
+      }
+    }, 10_000);
+  }
+
+  function scheduleReconnect() {
+    const delay = RECONNECT_DELAYS[Math.min(reconnectAttempt, RECONNECT_DELAYS.length - 1)];
+    reconnectAttempt++;
+    reconnectTimer = setTimeout(() => connect(), delay);
   }
 
   function disconnect() {
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    if (staleTimer) clearInterval(staleTimer);
     eventSource?.close();
+    eventSource = null;
     connected.value = false;
+    stale.value = false;
+    reconnectAttempt = 0;
   }
 
   onMounted(() => connect());
   onUnmounted(() => disconnect());
 
-  return { connected, lastEventId, connect, disconnect };
+  return { connected, stale, lastEventAt, connect, disconnect };
 }
 ```
 
@@ -365,7 +496,7 @@ export function useSSE(url: string) {
 | `DataTable` | `columns[]`, `rows[]`, `loading`, `error`, `emptyMessage` | `sort`, `filter`, `row-click` | All 4 states handled internally | TanStack Table v8 wrapper |
 | `Badge` | `variant: 'success'\|'warning'\|'danger'\|'neutral'`, `label` | — | — | Green/grey/amber variants |
 | `NavBar` | `currentRoute` | `navigate` | — | Tab-style navigation |
-| `SideStatusPanel` | `sniffers[]`, `collapsed` | `toggle` | `loading`/`error`/`normal` | Expandable, green/grey indicators |
+| `SideStatusPanel` | `sniffers[]`, `collapsed` | `toggle` | `loading`/`empty`/`error`/`normal` | Expandable, green/grey indicators. Data source: GET /api/sniffers. Polls at 15s interval (or receives SSE `health:change` events). `empty` state: "No sniffers configured. Add a sniffer in Settings to begin capturing." |
 | `ChartCard` | `title`, `option`, `loading`, `error` | — | `loading`/`error`/`normal`/`empty` | ECharts wrapper with dark theme |
 | `PageHeader` | `title`, `description`, `actions?` | — | — | Page-level heading |
 | `TimeRangeSelector` | `modelValue` | `update:modelValue` | — | Preset buttons + custom range |
@@ -375,9 +506,21 @@ export function useSSE(url: string) {
 **DashboardView:**
 ```
 PageHeader("Dashboard")
-├── StatCard row (4 cards: devices seen, packets today, sniffers online, avg RSSI)
+├── StatCard row (4 cards: devices seen, packets today, sniffers online, gaps open)
+│     └── Data source: GET /api/stats → DashboardStats
+│     │   total_devices → "Devices Seen" card
+│     │   packets_today → "Packets Today" card
+│     │   sniffers_online → "Sniffers Online" card (with sniffers_total as context)
+│     │   gaps_open → "Open Gaps" card
+│     │   packet_rate_current → displayed as subtitle/trend on packets card
+│     │   disk_usage_pct → displayed in SideStatusPanel (via health store)
+│     │   uptime_seconds → displayed in SideStatusPanel (via health store)
 ├── ChartCard (packets over time, line chart)
+│     └── Data source: GET /api/devices/{mac}/timeline aggregated across all devices
+│         (or a future /api/stats/timeseries endpoint; for MVP, derived from
+│         device timeline queries or the Grafana pipeline-health dashboard)
 ├── ChartCard (top devices by observations, bar chart)
+│     └── Data source: GET /api/devices?sort=-total_count&limit=10
 └── GrafanaEmbed (pipeline-health dashboard, iframe)
 ```
 
@@ -395,8 +538,12 @@ PageHeader("Device Map")
 PageHeader("Packet Explorer")
 ├── TimeRangeSelector
 ├── Filter bar (sniffer, PDU type, channel, address)
+│     └── Filter values populated from GET /api/sniffers (for sniffer dropdown)
 └── DataTable (columns: time, sniffer, address, type, RSSI, channel, raw hex)
-    └── Expandable row: full packet detail
+      └── Data source: GET /api/packets?sniffer_id=&mac=&pdu_type=&channel=&since=&limit=&offset=
+      │   Paginated via limit/offset. Sort: -ts (newest first).
+      │   Total row count from response.total for pagination controls.
+      └── Expandable row: full packet detail with raw hex dump
 ```
 
 **SettingsView:**
@@ -428,7 +575,17 @@ export const apiClient = createClient<paths>({
 });
 ```
 
-**API key handling:** The API key is never stored in client-side JavaScript source. It is injected by C09 as a `meta` tag in `index.html` or as a non-HttpOnly cookie (acceptable for LAN-only deployment). The C09 API serves the SPA and injects the key at response time.
+**API key handling:** The API key is never stored in client-side JavaScript source. Two authentication mechanisms are used:
+
+1. **REST requests (openapi-fetch):** The API key is injected by C09 into `index.html` as a `<meta name="tianer-api-key" content="...">` tag at serve time. The `useApi` composable reads it from the DOM on mount and sets it as the `X-API-Key` header on all REST requests.
+
+2. **SSE connection (EventSource):** The native `EventSource` API [12] cannot send custom HTTP headers (no `Authorization`, no `X-API-Key`). Therefore, SSE authentication uses a **cookie-based approach**:
+   - On first valid API key validation (via REST), C09 sets a `tianer_auth` cookie with attributes `Secure; SameSite=Strict; HttpOnly; Path=/api`.
+   - The SSE `EventSource` connects with `withCredentials: true`, causing the browser to automatically send the `tianer_auth` cookie.
+   - The C09 SSE endpoint validates either the `X-API-Key` header OR the `tianer_auth` cookie for authentication.
+   - This is the recommended MVP approach because it requires zero client-side cryptographic handling for SSE.
+
+**Rationale for cookie over `fetch()` polyfill:** A `fetch()`-based SSE implementation using `ReadableStream` could carry the `X-API-Key` header but introduces complexity (manual line parsing, reconnection logic, browser compatibility concerns). The cookie approach leverages `EventSource`'s built-in reconnection and is well-tested across browsers. On a LAN-only deployment with TLS, the `HttpOnly` cookie is an acceptable auth mechanism for the SSE stream.
 
 ### 4.3 Dark Theme — BreachLab Design Tokens
 
@@ -443,13 +600,15 @@ Per PD-03-theme, the visual design follows a moderated BreachLab aesthetic [2]:
 | Accent hover | `--color-accent-hover` | `#d4890a` |
 | Text primary | `--color-text-primary` | `#e0e0e0` |
 | Text secondary | `--color-text-secondary` | `#888899` |
-| Text muted | `--color-text-muted` | `#555566` |
+| Text muted | `--color-text-muted` | `#7a7a8c` |
 | Status online | `--color-status-online` | `#22c55e` (green-500) |
-| Status offline | `--color-status-offline` | `#555566` (grey) |
+| Status offline | `--color-status-offline` | `#6e6e80` |
 | Border | `--color-border` | `#222233` |
 | Font mono | `--font-mono` | `'JetBrains Mono', 'Fira Code', monospace` |
 | Font sans | `--font-sans` | `'Inter', system-ui, sans-serif` |
 | Focus ring | `--color-focus-ring` | `#f5a00c` (amber, 2px, for WCAG 2.4.7) |
+
+**Advisory note — SC 1.4.1 Use of Color:** The status-offline indicator uses a distinct shape (dashed border) alongside colour to ensure accessibility for colour-blind operators. This satisfies WCAG 2.2 SC 1.4.1 (Use of Color) by conveying information through more than one sensory channel [2].
 
 ### 4.4 4-State Rendering Pattern
 
@@ -503,15 +662,16 @@ Each view renders conditionally based on `state`:
 
 **Endpoints consumed by frontend:**
 
-| Method | Path | Purpose | Polling/SSE |
-|--------|------|---------|-------------|
-| GET | `/api/devices` | Device summary list | Poll 30s |
-| GET | `/api/devices/{address}` | Single device detail | On demand |
-| GET | `/api/packets` | Raw packet list (paginated) | Poll 15s |
-| GET | `/api/sniffers` | Sniffer health status | SSE |
-| GET | `/api/stats` | Aggregate statistics | Poll 60s |
-| GET | `/api/health` | API health check | Poll 30s |
-| GET | `/api/events` | SSE event stream | Persistent SSE |
+| Method | Path | Purpose | Polling/SSE | Notes |
+|--------|------|---------|-------------|-------|
+| GET | `/api/devices` | Device summary list | Poll 30s | Paginated; consumed by DeviceMapView + DashboardView top-devices chart |
+| GET | `/api/devices/{address}` | Single device detail | On demand | Expandable row drill-down in DeviceMapView |
+| GET | `/api/devices/{address}/timeline` | Device timeline data | On demand | Consumed by device detail expandable row |
+| GET | `/api/packets` | Raw packet list (paginated) | Poll 15s | Consumed by PacketExplorerView DataTable. Filters: sniffer_id, mac, pdu_type, channel, since |
+| GET | `/api/sniffers` | Sniffer health status | Poll 15s (initial load) + SSE updates | Consumed by SideStatusPanel. SSE `health:change` events provide live updates between polls |
+| GET | `/api/stats` | Aggregate dashboard statistics | Poll 60s | Consumed by DashboardView StatCards. C09 caches response for 30s (`Cache-Control: max-age=30`). Frontend respects this with `If-None-Match` / 304 handling |
+| GET | `/api/health` | API health check | Poll 30s | Used for connection status indicator; also consumed by SideStatusPanel for degraded/error state |
+| GET | `/api/events` | SSE event stream | Persistent SSE | Live `health:change`, `device:new`, `packet:batch` events update stores without polling |
 
 ### 5.2 Contract FRONT-2: Frontend ↔ Grafana (iframe)
 
@@ -521,7 +681,7 @@ Each view renders conditionally based on `state`:
 | **Auth** | Anonymous access [UXE-05] |
 | **CSP** | `frame-src https://grafana.tianer.local:3000` (CSP Level 2 `frame-ancestors` on Grafana side) [8] |
 | **Sandbox** | `sandbox="allow-scripts allow-same-origin"` (not `allow-top-navigation`) |
-| **Dashboards** | `pipeline-health`, `live-metrics` |
+| **Dashboards** | `pipeline-health` |
 
 ### 5.3 Contract FRONT-3: Vite Dev Server ↔ C09 API (Proxy)
 
@@ -733,9 +893,9 @@ Tailwind CSS 4 uses CSS-first configuration [4]. Custom theme values are defined
   --color-accent-hover: #d4890a;
   --color-text-primary: #e0e0e0;
   --color-text-secondary: #888899;
-  --color-text-muted: #555566;
+  --color-text-muted: #7a7a8c;
   --color-status-online: #22c55e;
-  --color-status-offline: #555566;
+  --color-status-offline: #6e6e80;
   --color-border: #222233;
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
   --font-sans: 'Inter', system-ui, sans-serif;

@@ -803,7 +803,7 @@ C11 serves dashboards that are embedded in C10's Vue 3 frontend via iframe. This
 | **Auth** | Anonymous (no credentials required in iframe) |
 | **Headers** | `X-Frame-Options: sameorigin` (allows iframe from same origin only); CSP `frame-ancestors 'self'` |
 | **Reverse proxy** | C09 REST API proxies `/grafana/*` → `http://tianer-grafana:3000` to ensure same-origin embedding |
-| **Supported dashboards** | All four (live-metrics, device-explorer, per-device-drilldown, pipeline-health) |
+| **Supported dashboards** | pipeline-health (primary embed via C10); all four dashboards are available via Grafana's own UI |
 | **Variable passthrough** | `$mac` and `$sniffer` can be set via URL query parameters in the iframe `src` |
 | **Theme consistency** | Cyberpunk dark theme matches the Vue frontend's dark mode |
 | **SLA** | Dashboard iframe loads within 3 seconds on LAN |
@@ -1273,7 +1273,7 @@ Each dashboard JSON file is validated for structural correctness and query valid
 |------|-------------|---------------------|
 | `test_dashboard_json_valid.sh` | Validate each `.json` file is parseable JSON and has required top-level fields | All 4 files are valid JSON with `"uid"`, `"title"`, `"panels"`, `"schemaVersion"` fields |
 | `test_datasource_yaml_valid.sh` | Validate `timescaledb.yaml` is parseable YAML with required fields | Valid YAML with `datasources[0].name`, `.type`, `.url`, `.database`, `.user` |
-| `test_dashboard_provisioning_yaml_valid.sh` | Validate `default.yaml` is parseable YAML | Valid YAML with `providers[0].name`, `.folder`, `.options.path` |
+| `test_dashboard_provisioning_yaml_valid.sh` | Validate `default.yaml` is parseable YAML [6] | Valid YAML with `providers[0].name`, `.folder`, `.options.path` |
 | `test_sql_syntax.sh` | Extract all SQL queries from dashboard JSONs and validate syntax against a test PostgreSQL instance | All `SELECT` statements parse without syntax errors; no `INSERT`, `UPDATE`, `DELETE`, `DROP`, or `TRUNCATE` statements |
 | `test_sql_readonly.sh` | Verify all queries use `SELECT` only (no write operations) | Grep dashboard JSONs for write keywords — must return zero matches |
 
@@ -1569,3 +1569,5 @@ Before considering C11 deployed, verify:
 [4] Timescale, Inc. "time_bucket() — TimescaleDB API Reference." https://docs.timescale.com/api/latest/hyperfunctions/time_bucket/, 2024.
 
 [5] Grafana Labs. "Dashboard JSON Model — Grafana Documentation." https://grafana.com/docs/grafana/latest/dashboards/build-dashboards/view-dashboard-json-model/, 2024. Describes dashboard schema, templating variables, and `schemaVersion`.
+
+[6] Grafana Labs. "Grafana Documentation — Provisioning." https://grafana.com/docs/grafana/latest/administration/provisioning/, v10.4. — Documents Grafana's file-based provisioning system: datasource provisioning YAML format, dashboard provider configuration, provisioning reload intervals, and the directory layout for automated dashboard deployment — referenced in C11's provisioning architecture (§1.1) and integration tests (§10.2, §10.5).
