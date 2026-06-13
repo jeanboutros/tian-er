@@ -3,7 +3,7 @@
 ## v1 Technical Design: Passive Bluetooth Sensor Module
 
 **Status:** Draft v0.5
-**Author:** Jean (with Claude)
+**Author:** Jean
 **Last updated:** 2026-06-07
 **Target audience:** Autonomous coding agents implementing the platform end to end.
 
@@ -2872,10 +2872,10 @@ These are not Bluetooth concerns at all; they are listed here as a reminder that
 
 | Date | Version | Author | Change |
 |------|---------|--------|--------|
-| 2026-06-06 | 0.1 | Jean + Claude | Initial draft from voice design session |
-| 2026-06-06 | 0.2 | Jean + Claude | Expanded for autonomous agent development: repository structure, pinned tech stack, configuration, contracts, testing strategy, fixtures, deployment automation, end-to-end verification, per-task acceptance criteria |
-| 2026-06-07 | 0.3 | Jean + Claude | Updated versions to current releases (Raspberry Pi OS Trixie, PostgreSQL 17, Python 3.13, Node.js 24 LTS); added academic-style references; added comprehensive Section 6 covering users, groups, capabilities, file system layout, PostgreSQL roles, systemd privilege drop, and a runtime contract that no service requires sudo |
-| 2026-06-07 | 0.5 | Jean + Claude | Reframed as Tian'er Signal Intelligence Platform with a roadmap of future sensor modules (GPS, ADS-B, Wi-Fi, cellular, ISM band, FM/DAB, LoRaWAN, AIS, acoustic, RF leakage); v1 is now explicitly scoped to the Bluetooth sensor module on shared platform infrastructure. Project-level identifier `tianer`; v1 module identifier remains `blesniff` for Bluetooth-specific components. Cross-module architectural commitments documented so v1 does not block future modules. |
+| 2026-06-06 | 0.1 | Jean | Initial draft from voice design session |
+| 2026-06-06 | 0.2 | Jean | Expanded for autonomous agent development: repository structure, pinned tech stack, configuration, contracts, testing strategy, fixtures, deployment automation, end-to-end verification, per-task acceptance criteria |
+| 2026-06-07 | 0.3 | Jean | Updated versions to current releases (Raspberry Pi OS Trixie, PostgreSQL 17, Python 3.13, Node.js 24 LTS); added academic-style references; added comprehensive Section 6 covering users, groups, capabilities, file system layout, PostgreSQL roles, systemd privilege drop, and a runtime contract that no service requires sudo |
+| 2026-06-07 | 0.5 | Jean | Reframed as Tian'er Signal Intelligence Platform with a roadmap of future sensor modules (GPS, ADS-B, Wi-Fi, cellular, ISM band, FM/DAB, LoRaWAN, AIS, acoustic, RF leakage); v1 is now explicitly scoped to the Bluetooth sensor module on shared platform infrastructure. Project-level identifier `tianer`; v1 module identifier remains `blesniff` for Bluetooth-specific components. Cross-module architectural commitments documented so v1 does not block future modules. |
 
 ---
 
