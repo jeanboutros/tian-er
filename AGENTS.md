@@ -42,7 +42,7 @@ Tian'er is an instrument that must be reliable enough to depend on — not a dem
 
 ## Design Document Structure
 
-All design documents in `doc/designs/` must contain these sections:
+All design documents in `docs/designs/` must contain these sections:
 
 1. **Overview** — Purpose, scope, boundaries, position in the system
 2. **High-Level Architecture (HLA)** — Component diagram, data flow, neighbouring components
@@ -73,7 +73,7 @@ If a source is unreachable, state that explicitly and ask the user rather than g
 
 ### Mandatory Citations in Design Documents
 
-**Every design document (`doc/designs/c*.md`) MUST include academic-style references to authoritative sources.** No design document may rely solely on agent training data or internal project documents. This is non-negotiable.
+**Every design document (`docs/designs/c*.md`) MUST include academic-style references to authoritative sources.** No design document may rely solely on agent training data or internal project documents. This is non-negotiable.
 
 **Reference quality requirements:**
 
@@ -202,7 +202,7 @@ Every commit MUST include a body that describes:
 **After any change to the project, agents MUST update all affected documentation before considering the task complete.**
 
 This includes:
-- `doc/designs/` design documents — update when components change
+- `docs/designs/` design documents — update when components change
 - `AGENTS.md` — update when project configuration changes
 - `README.md` — update when project status changes
 - `docs/adr/` — add ADR when a decision is resolved
@@ -309,7 +309,7 @@ This rule exists because advisory text ("I should not write code") is insufficie
 
 ## Design Documents
 
-All design documents are in `doc/designs/`. See `doc/designs/component-breakdown.md` for the full component inventory, dependency map, and per-component artifact requirements.
+All design documents are in `docs/designs/`. See `docs/designs/component-breakdown.md` for the full component inventory, dependency map, and per-component artifact requirements.
 
 | Document | Component |
 |----------|-----------|

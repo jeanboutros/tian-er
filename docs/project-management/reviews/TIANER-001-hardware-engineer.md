@@ -5,7 +5,7 @@
 | Reviewer | Hardware Engineer |
 | Phase | A (Design Review) |
 | Date | 2026-06-07 |
-| Artifact | `doc/designs/inception.md` v0.5 |
+| Artifact | `docs/designs/inception.md` v0.5 |
 | Review scope | Hardware compatibility, USB device mapping, thermal/power constraints, hardware failure modes, storage constraints, firmware version management |
 
 ---

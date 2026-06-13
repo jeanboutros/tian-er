@@ -5,7 +5,7 @@
 | Reviewer | Software Engineer |
 | Phase | A (Design Review) |
 | Date | 2026-06-07 |
-| Artifact | `doc/designs/inception.md` v0.5 |
+| Artifact | `docs/designs/inception.md` v0.5 |
 | Review scope | Component boundaries/contracts, data flow architecture, technology choices, scalability, error propagation, deployment, observability, design-for-failure |
 
 ---

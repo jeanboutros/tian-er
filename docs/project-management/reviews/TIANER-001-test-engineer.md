@@ -5,7 +5,7 @@
 | Reviewer | Test Engineer |
 | Phase | A (Design Review) |
 | Date | 2026-06-07 |
-| Artifact | `doc/designs/inception.md` v0.5 |
+| Artifact | `docs/designs/inception.md` v0.5 |
 | Review scope | Testability of acceptance criteria, test coverage gaps, integration test strategy, performance test feasibility, test data strategy, CI pipeline, smoke test comprehensiveness |
 
 ---

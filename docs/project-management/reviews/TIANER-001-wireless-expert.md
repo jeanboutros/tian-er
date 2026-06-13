@@ -5,7 +5,7 @@
 | Reviewer | Wireless Expert |
 | Phase | A (Design Review) |
 | Date | 2026-06-07 |
-| Artifact | `doc/designs/inception.md` v0.5 |
+| Artifact | `docs/designs/inception.md` v0.5 |
 | Review scope | BLE protocol compliance, sniffer capability, RF accuracy, data whitening, MAC randomization, BR/EDR, cross-sniffer timing |
 
 ---

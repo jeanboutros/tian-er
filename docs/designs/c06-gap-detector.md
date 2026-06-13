@@ -12,7 +12,7 @@
 
 ### 1.1 Purpose
 
-C06 Gap Detector is the **ingest reliability and recovery component** of the Tian'er platform. It detects time windows where packets are missing from the `raw_packets` hypertable, backfills those gaps from the authoritative on-disk PCAP archive, and provides secondary verification that the PCAP-to-DB pipeline is complete. C06 implements Layers 3 and 4 of the five-layer data integrity architecture defined in `doc/designs/storage-strategy.md`.
+C06 Gap Detector is the **ingest reliability and recovery component** of the Tian'er platform. It detects time windows where packets are missing from the `raw_packets` hypertable, backfills those gaps from the authoritative on-disk PCAP archive, and provides secondary verification that the PCAP-to-DB pipeline is complete. C06 implements Layers 3 and 4 of the five-layer data integrity architecture defined in `docs/designs/storage-strategy.md`.
 
 ### 1.2 Scope
 

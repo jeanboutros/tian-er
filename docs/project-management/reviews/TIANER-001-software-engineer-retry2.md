@@ -6,8 +6,8 @@
 **Date:** 2026-06-07  
 **Phase:** A (A1-SW, retry #2)  
 **Artifacts reviewed:**
-- `doc/designs/inception.md`
-- `doc/designs/component-breakdown.md`
+- `docs/designs/inception.md`
+- `docs/designs/component-breakdown.md`
 - `docs/project-management/passports/TIANER-001-passport.md`
 
 ## VERDICT: REJECTED

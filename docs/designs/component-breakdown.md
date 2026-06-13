@@ -62,7 +62,7 @@ The platform is decomposed into 14 components organized by responsibility domain
 
 ### 2.1a Container Orchestration (Q1 Resolution)
 
-All components run in Podman containers managed by Quadlet. USB devices are passed through from the host using persistent udev symlinks (Q4). The deployment model uses **rootless Podman** with `--group-add keep-groups` for the `tianer` user. See `doc/designs/storage-strategy.md` for the full volume inventory, per-container access matrix, and Quadlet unit file specifications.
+All components run in Podman containers managed by Quadlet. USB devices are passed through from the host using persistent udev symlinks (Q4). The deployment model uses **rootless Podman** with `--group-add keep-groups` for the `tianer` user. See `docs/designs/storage-strategy.md` for the full volume inventory, per-container access matrix, and Quadlet unit file specifications.
 
 **Container-Pod Architecture:**
 - **tianer-capture pod** (Network=none): sniffer + tshark containers, one instance per sniffer
@@ -444,7 +444,7 @@ Every component design document MUST contain the following sections. This is the
 
 ### 5.2 Per-Component Artifact Details
 
-**Container Storage (Q11):** Each component design document must reference the volume inventory from `doc/designs/storage-strategy.md` and specify which volumes it mounts, with what access mode (`:ro` or `:rw`). The per-component artifact lists below have been updated with the relevant storage volumes.
+**Container Storage (Q11):** Each component design document must reference the volume inventory from `docs/designs/storage-strategy.md` and specify which volumes it mounts, with what access mode (`:ro` or `:rw`). The per-component artifact lists below have been updated with the relevant storage volumes.
 
 #### C01 — Platform Infrastructure
 

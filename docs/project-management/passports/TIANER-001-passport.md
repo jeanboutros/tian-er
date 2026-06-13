@@ -175,7 +175,7 @@ Decisions resolved by the user:
 | Q9 | DB role least-privilege | Write-only role for ingest/gap-detector streams. Read-only role for UI/dashboards. DDL-capable `tianer` role restricted to API server and migration runner. | 2026-06-07 |
 | Q10 | Supply chain integrity for MVP | Required for Phase 1. GPG verification for apt repos, SHA256 checksums for downloaded binaries, digest pinning for container images, `npm audit` in CI, hash-pinning for Python dependencies (`uv --require-hashes`). | 2026-06-07 |
 | TX-CI | CI provider | GitHub Actions (`.github/workflows/ci.yml`) | 2026-06-07 |
-| Q11 | Container persistent storage strategy | Full storage strategy designed by Software Engineer. Saved to doc/designs/storage-strategy.md. 7 persistent volumes (V01-V07), 2 ephemeral tmpfs (V08-V09). 11 container types across 2 pods + 2 standalone. Per-container access matrix with :ro constraints. Data flow ownership: sniffer writes raw → tshark parses → ingest writes DB → batch workers read PCAP archive. Quadlet .container/.volume/.network/.pod unit files specified in deploy/containers/. | 2026-06-07 |
+| Q11 | Container persistent storage strategy | Full storage strategy designed by Software Engineer. Saved to docs/designs/storage-strategy.md. 7 persistent volumes (V01-V07), 2 ephemeral tmpfs (V08-V09). 11 container types across 2 pods + 2 standalone. Per-container access matrix with :ro constraints. Data flow ownership: sniffer writes raw → tshark parses → ingest writes DB → batch workers read PCAP archive. Quadlet .container/.volume/.network/.pod unit files specified in deploy/containers/. | 2026-06-07 |
 
 ## Retry-2 Resolutions (2026-06-07)
 

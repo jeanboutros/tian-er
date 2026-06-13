@@ -57,7 +57,7 @@ During Phase A review of the Tian'er inception document and component breakdown,
 | D-11 | Heartbeat fallback | Local file primary (`/var/lib/tianer/heartbeat/<name>.ts`), DB table secondary | DB outage must not trigger false-positive gap alerts |
 | NEW | Container orchestration | Podman + Quadlet, all-container model | Consistency, reproducibility, sandboxing |
 | Q1 | Container model | All components in rootless Podman containers. USB devices passed through from host. | Rootless preferred for security; USB passthrough via `--device` and `--group-add keep-groups` |
-| Q11 | Persistent storage strategy | 9 volumes (V01-V09), 2 pods, per-container access matrix with `:ro` constraints | Detailed in `doc/designs/storage-strategy.md` |
+| Q11 | Persistent storage strategy | 9 volumes (V01-V09), 2 pods, per-container access matrix with `:ro` constraints | Detailed in `docs/designs/storage-strategy.md` |
 
 ## Consequences
 

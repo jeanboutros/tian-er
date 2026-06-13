@@ -5,7 +5,7 @@
 | Reviewer | Security Reviewer |
 | Phase | A (Design Review) |
 | Date | 2026-06-07 |
-| Artifact | `doc/designs/inception.md` v0.5 |
+| Artifact | `docs/designs/inception.md` v0.5 |
 | Review scope | Attack surface, secrets management, API authentication, database security, supply chain, physical security, data privacy, input validation, process isolation |
 
 ---

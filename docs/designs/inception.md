@@ -855,7 +855,7 @@ echo "PREREQUISITES OK"
 
 ## 8. Component Specifications
 
-**Deployment Model (Q1/Q11 resolution):** All components run in Podman containers managed by Quadlet. USB devices are passed through from the host. Persistent storage uses the volume strategy documented in `doc/designs/storage-strategy.md`. The systemd-based descriptions below are retained for per-component logic; the containerized deployment model supersedes the bare-metal service descriptions for operational concerns.
+**Deployment Model (Q1/Q11 resolution):** All components run in Podman containers managed by Quadlet. USB devices are passed through from the host. Persistent storage uses the volume strategy documented in `docs/designs/storage-strategy.md`. The systemd-based descriptions below are retained for per-component logic; the containerized deployment model supersedes the bare-metal service descriptions for operational concerns.
 
 Each component section follows the same structure:
 
